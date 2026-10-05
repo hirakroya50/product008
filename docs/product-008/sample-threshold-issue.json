@@ -1,0 +1,6 @@
+{
+  "issueId": "threshold-demo",
+  "title": "Change the free shipping threshold to $100",
+  "body": "Update the free shipping progress banner in CartDrawer to use a $100 threshold. Keep subtotal and stock behavior intact, clamp progress at 100%, and show unlocked messaging at or above $100.",
+  "labels": ["enhancement", "cart"]
+}

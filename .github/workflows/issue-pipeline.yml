@@ -1,0 +1,83 @@
+name: Product 008 - Issue to draft PR
+on:
+  issues:
+    types: [opened, reopened]
+  workflow_dispatch:
+    inputs:
+      issue_number:
+        description: Existing issue number to process
+        required: true
+        type: string
+permissions:
+  contents: write
+  issues: read
+  pull-requests: write
+concurrency:
+  group: product008-issue-pipeline
+  cancel-in-progress: false
+jobs:
+  pipeline:
+    # Only repository owners/collaborators/members can initiate this demo automatically.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.issue.author_association)
+    runs-on: macos-15
+    timeout-minutes: 40
+    env:
+      HARNESS_MODE: offline
+      GH_TOKEN: ${{ github.token }}
+      VALKEY_URL: ${{ secrets.VALKEY_URL }}
+      ISSUE_NUMBER: ${{ github.event.issue.number || inputs.issue_number }}
+      BASE_BRANCH: ${{ github.event.repository.default_branch }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.26.2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Require hosted Valkey configuration
+        run: |
+          if [[ -z "$VALKEY_URL" ]]; then
+            echo 'Add VALKEY_URL in repository Actions secrets before running the issue pipeline.' >&2
+            exit 1
+          fi
+      - name: Intake, triage, fit, develop, test, fix, commit and audit
+        id: engine
+        run: bash scripts/run-issue.sh "$ISSUE_NUMBER"
+      - name: Publish draft PR for human review
+        env:
+          WORK_ID: ${{ steps.engine.outputs.work_id }}
+        run: |
+          branch="$(git branch --show-current)"
+          ahead="$(git rev-list --count "origin/$BASE_BRANCH..HEAD")"
+          if [[ "$ahead" == 0 ]]; then
+            echo 'Requested change is already present; no new PR required.' >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          git push --set-upstream origin "$branch"
+          existing="$(gh pr list --head "$branch" --base "$BASE_BRANCH" --state open --json url --jq '.[0].url // empty')"
+          if [[ -n "$existing" ]]; then
+            pr_url="$existing"
+          else
+            pr_url="$(gh pr create --draft --base "$BASE_BRANCH" --head "$branch" --title "fix(store): resolve issue #$ISSUE_NUMBER [automated]" --body-file "work/$WORK_ID/pr-summary.md")"
+          fi
+          printf 'Draft PR awaiting human review: %s\n' "$pr_url" >> "$GITHUB_STEP_SUMMARY"
+          printf '%s\n' "$pr_url" > "work/$WORK_ID/pr-url.txt"
+      - name: Preserve work records, logs and acceptance evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: product008-issue-${{ github.event.issue.number || inputs.issue_number }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            work/
+            docs/product-008/evidence.json
+          if-no-files-found: warn
+          retention-days: 14

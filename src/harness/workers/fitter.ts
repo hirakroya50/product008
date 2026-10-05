@@ -6,6 +6,7 @@ import {
   type Diagnosis,
   type Draft,
 } from "../common";
+import { shippingRequest } from "../shipping-request";
 export const shippingPaths = [
   "src/components/CartDrawer.tsx",
   "src/components/ShippingProgress.tsx",
@@ -20,6 +21,8 @@ export function fitter(id: string, paths: string[], approvedCost: boolean) {
     paths.some((p) => !shippingPaths.includes(p))
   )
     throw new Error("Fitter requires exact bounded shipping paths");
+  const request = shippingRequest(d.issue);
+  if (!request) throw new Error("Unsupported shipping request");
   const draft: Draft = {
     issue: d.issue,
     paths,
@@ -28,7 +31,7 @@ export function fitter(id: string, paths: string[], approvedCost: boolean) {
       "Modify only listed files",
       "No dependency, secret, network, or infrastructure edits",
       "Preserve cart stock and subtotal behavior",
-      "Free shipping threshold $75; progress clamped 0..100",
+      `Free shipping threshold $${request.threshold}; progress clamped 0..100`,
     ],
     tests: ["typecheck", "build", "test"],
     maxCycles: 3,

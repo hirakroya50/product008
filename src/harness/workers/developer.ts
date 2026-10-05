@@ -1,20 +1,27 @@
 import fs from "node:fs";
 import OpenAI from "openai";
 import { read, write, safePath, hash, type Draft } from "../common";
+import { shippingRequest } from "../shipping-request";
 export const shippingComponent = `export const FREE_SHIPPING_THRESHOLD = 75;
 export function shippingProgress(total: number) { return Math.max(0, Math.min(100, total / FREE_SHIPPING_THRESHOLD * 100)); }
 export function ShippingProgress({subtotal}: {subtotal:number}) {const remaining=Math.max(0,FREE_SHIPPING_THRESHOLD-subtotal);return <section className="shipping-banner" aria-label="Free shipping progress"><p role="status">{remaining>0?\`You're $\${remaining.toFixed(2)} away from free shipping.\`:'You unlocked free shipping!'}</p><progress aria-label="Shipping progress" value={shippingProgress(subtotal)} max={100}/></section>; }
 `;
-export const shippingTest = `import {describe,it,expect} from 'vitest'; import {render,screen} from '@testing-library/react'; import {ShippingProgress,shippingProgress} from '../components/ShippingProgress'; import {CartDrawer} from '../components/CartDrawer'; import {products} from '../data/products';
-describe('free shipping',()=>{it.each([[0,0],[37.5,50],[75,100],[100,100],[-10,0]])('clamps subtotal %s to progress %s',(total,expected)=>{expect(shippingProgress(total)).toBe(expected);});it('shows remaining dollars',()=>{render(<ShippingProgress subtotal={32}/>);expect(screen.getByRole('status')).toHaveTextContent("$43.00 away");});it('qualifies exactly at threshold',()=>{render(<ShippingProgress subtotal={75}/>);expect(screen.getByRole('status')).toHaveTextContent('You unlocked free shipping');});it('integrates with actual cart subtotal',()=>{render(<CartDrawer items={[{product:products[0],size:'M',color:products[0].colors[0],quantity:2}]} onClose={()=>{}} onQuantity={()=>{}}/>);expect(screen.getByRole('status')).toHaveTextContent('$11.00 away');});});
+export function shippingTestFor(threshold: number) {
+  return `import {describe,it,expect} from 'vitest'; import {render,screen} from '@testing-library/react'; import {ShippingProgress,shippingProgress,FREE_SHIPPING_THRESHOLD} from '../components/ShippingProgress'; import {CartDrawer} from '../components/CartDrawer'; import {products} from '../data/products';
+describe('free shipping',()=>{it('uses the requested threshold',()=>{expect(FREE_SHIPPING_THRESHOLD).toBe(${threshold});});it.each([[0,0],[FREE_SHIPPING_THRESHOLD/2,50],[FREE_SHIPPING_THRESHOLD,100],[FREE_SHIPPING_THRESHOLD+25,100],[-10,0]])('clamps subtotal %s to progress %s',(total,expected)=>{expect(shippingProgress(total)).toBe(expected);});it('shows remaining dollars',()=>{render(<ShippingProgress subtotal={FREE_SHIPPING_THRESHOLD/2}/>);expect(screen.getByRole('status')).toHaveTextContent('$'+(FREE_SHIPPING_THRESHOLD/2).toFixed(2)+' away');});it('qualifies exactly at threshold',()=>{render(<ShippingProgress subtotal={FREE_SHIPPING_THRESHOLD}/>);expect(screen.getByRole('status')).toHaveTextContent('You unlocked free shipping');});it('integrates with actual cart subtotal',()=>{render(<CartDrawer items={[{product:products[0],size:'M',color:products[0].colors[0],quantity:2}]} onClose={()=>{}} onQuantity={()=>{}}/>);const remaining=FREE_SHIPPING_THRESHOLD-products[0].price*2;expect(screen.getByRole('status')).toHaveTextContent(remaining>0?'$'+remaining.toFixed(2)+' away':'You unlocked free shipping');});});
 `;
-export function mockPatch(original?: string) {
+}
+export const shippingTest = shippingTestFor(75);
+export function mockPatch(original?: string, threshold = 75) {
   const cart =
     original ??
     fs.readFileSync(safePath("src/components/CartDrawer.tsx"), "utf8");
   return {
-    "src/components/ShippingProgress.tsx": shippingComponent,
-    "src/__tests__/shipping.test.tsx": shippingTest,
+    "src/components/ShippingProgress.tsx": shippingComponent.replace(
+      "= 75;",
+      `= ${threshold};`,
+    ),
+    "src/__tests__/shipping.test.tsx": shippingTestFor(threshold),
     "src/components/CartDrawer.tsx": cart
       .replace(
         "// SHIPPING_IMPORT",
@@ -32,6 +39,8 @@ export async function developer(id: string, repair = false) {
     for (const p of draft.paths)
       if (hash(safePath(p)) !== draft.hashes[p])
         throw new Error(`Stale draft: ${p}`);
+  const request = shippingRequest(draft.issue);
+  if (!request) throw new Error("Unsupported shipping request");
   let patch: Record<string, string>;
   const mode =
     process.env.HARNESS_MODE ??
@@ -67,6 +76,7 @@ export async function developer(id: string, repair = false) {
             "src/components/CartDrawer.tsx"
           ]
         : undefined,
+      request.threshold,
     );
   else throw new Error("Unknown HARNESS_MODE");
   if (
