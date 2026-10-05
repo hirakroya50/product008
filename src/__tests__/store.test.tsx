@@ -59,6 +59,9 @@ describe("ThreadCraft", () => {
     );
     expect(screen.getAllByText("$64.00")).toHaveLength(2);
     fireEvent.click(screen.getByRole("button", { name: "Checkout" }));
-    expect(screen.getByRole("status")).toHaveTextContent("Demo checkout ready");
+    expect(screen.getByText(/Demo checkout ready/)).toHaveAttribute(
+      "role",
+      "status",
+    );
   });
 });
