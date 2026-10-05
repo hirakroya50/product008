@@ -41,11 +41,16 @@ export function tester(id: string, cycle = 0) {
       "vite.config.ts",
     ])
       fs.cpSync(path.join(root, p), path.join(dir, p), { recursive: true });
-    fs.symlinkSync(
-      path.join(root, "node_modules"),
-      path.join(dir, "node_modules"),
-      "dir",
-    );
+    // Keep dependency packages read-only, but put Vite caches in the sandbox.
+    const modules = path.join(dir, "node_modules");
+    fs.mkdirSync(modules);
+    for (const entry of fs.readdirSync(path.join(root, "node_modules"))) {
+      if ([".vite", ".vite-temp", ".cache"].includes(entry)) continue;
+      fs.symlinkSync(
+        path.join(root, "node_modules", entry),
+        path.join(modules, entry),
+      );
+    }
     const profile = `(version 1)(allow default)(deny network*)(deny file-write*)(allow file-write* (subpath ${JSON.stringify(physical)}))(allow file-write* (literal "/dev/null"))`;
     for (const name of ["typecheck", "build", "test"]) {
       const now = Date.now();
