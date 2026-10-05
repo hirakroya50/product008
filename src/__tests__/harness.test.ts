@@ -2,7 +2,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { MemoryLease, leaseProbe, withLease } from "../harness/lease";
 import { normalize } from "../harness/intake";
-import { safePath, approve } from "../harness/common";
+import { safePath, approve, getOption } from "../harness/common";
 describe("pipeline boundaries", () => {
   it("denies collisions and non-owner operations", async () => {
     const l = new MemoryLease();
@@ -52,5 +52,17 @@ describe("pipeline boundaries", () => {
     expect(() =>
       approve(["--approve-write", "--approve-cost"], true),
     ).not.toThrow();
+  });
+});
+
+describe("CLI options", () => {
+  it("uses defaults for absent flags and rejects missing values", () => {
+    expect(getOption(["--work", "work-1"], "--output")).toBeUndefined();
+    expect(getOption(["--output", "evidence.json"], "--output")).toBe(
+      "evidence.json",
+    );
+    expect(() =>
+      getOption(["--paths", "--approve-write"], "--paths"),
+    ).toThrow();
   });
 });

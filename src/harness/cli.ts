@@ -1,5 +1,4 @@
-import fs from "node:fs";
-import { approve, run, write } from "./common";
+import { approve, run, write, getOption } from "./common";
 import { withLease, leaseProbe } from "./lease";
 import { intake, intakeIssue } from "./intake";
 import { triager } from "./workers/triager";
@@ -11,7 +10,7 @@ import { gate } from "./git";
 import { doctor } from "./doctor";
 import { collect, acceptance } from "./evidence";
 const [command, ...args] = process.argv.slice(2);
-const option = (name: string) => args[args.indexOf(name) + 1];
+const option = (name: string) => getOption(args, name);
 const id = () => {
   const value = args.includes("--work") ? option("--work") : args[0];
   if (!value || value.startsWith("--"))
