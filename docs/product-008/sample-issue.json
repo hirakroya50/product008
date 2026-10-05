@@ -1,0 +1,6 @@
+{
+  "issueId": "008",
+  "title": "Add free shipping progress banner to CartDrawer",
+  "body": "Show remaining dollars until the $75 free shipping threshold. Clamp progress at 100%, update with cart subtotal, and show unlocked messaging at or above $75.",
+  "labels": ["enhancement", "cart"]
+}

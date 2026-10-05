@@ -1,0 +1,7 @@
+node_modules/
+dist/
+work/
+.env*
+!.env.example
+coverage/
+docs/product-008/evidence.json
