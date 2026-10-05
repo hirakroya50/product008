@@ -1,5 +1,5 @@
 import fs from "node:fs";
-import Redis from "ioredis";
+import { connectValkey } from "./valkey";
 import OpenAI from "openai";
 import { run } from "./common";
 import { leaseProbe } from "./lease";
@@ -21,13 +21,8 @@ export async function doctor(aiProbe = false) {
     },
   };
   if (process.env.VALKEY_URL) {
-    const redis = new Redis(process.env.VALKEY_URL, {
-      lazyConnect: true,
-      maxRetriesPerRequest: 0,
-      connectTimeout: 3000,
-    });
+    const redis = await connectValkey(process.env.VALKEY_URL);
     try {
-      await redis.connect();
       checks.valkey = {
         status: (await redis.ping()) === "PONG" ? "passed" : "failed",
         adapter: "valkey",

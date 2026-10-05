@@ -1,7 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
-import Redis from "ioredis";
+import type Redis from "ioredis";
+import { connectValkey } from "./valkey";
 import { root } from "./common";
 export class MemoryLease {
   private locks = new Map<string, { owner: string; expires: number }>();
@@ -51,12 +52,7 @@ export async function withLease<T>(fn: () => Promise<T>): Promise<T> {
   fs.mkdirSync(path.dirname(lock), { recursive: true });
   try {
     if (process.env.VALKEY_URL) {
-      redis = new Redis(process.env.VALKEY_URL, {
-        lazyConnect: true,
-        maxRetriesPerRequest: 0,
-        connectTimeout: 3000,
-      });
-      await redis.connect();
+      redis = await connectValkey(process.env.VALKEY_URL);
       if (
         (await redis.set("product008:workspace", owner, "PX", ttl, "NX")) !==
         "OK"
