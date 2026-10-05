@@ -2,7 +2,7 @@ import { X, Minus, Plus, ArrowRight, ShoppingBag } from "lucide-react";
 import { useState } from "react";
 import type { CartItem } from "../types/product";
 import { cartKey, subtotal } from "../cart";
-// SHIPPING_IMPORT
+import { ShippingProgress } from './ShippingProgress';
 export function CartDrawer({
   items,
   onClose,
@@ -31,7 +31,7 @@ export function CartDrawer({
             <X />
           </button>
         </header>
-        {/* SHIPPING_BANNER */}
+        <ShippingProgress subtotal={total}/>
         <div className="cart-items">
           {items.length === 0 ? (
             <div className="empty-cart">
