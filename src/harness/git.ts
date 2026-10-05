@@ -48,9 +48,9 @@ Branch: ${branch}
 - [ ] Review implementation and issue scope
 - [ ] Inspect sandbox logs and regression results
 - [ ] Approve accessibility and cart behavior
-- [ ] Authorize PR publication / merge
+- [ ] Review the draft PR and authorize merge
 
-Status: awaiting-human-approval. No remote PR, push, merge, or deployment performed.
+Status: awaiting-human-approval. Merge and deployment require human authorization.
 `;
   fs.writeFileSync(path.join(workDir(id), "pr-summary.md"), summary);
   return write(id, "git-record.json", {

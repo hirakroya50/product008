@@ -32,3 +32,7 @@ The request assigns cases 14–15 to both active Stage A and deferred Stage B. R
 Repeated demo runs verify the shipping feature idempotently; when it is already applied, Git reports the existing HEAD rather than manufacturing a code change.
 
 The optional API adapter follows the [official Responses API documentation](https://developers.openai.com/api/docs/guides/text).
+
+## Automatic GitHub issue demo
+
+See [GitHub issue to draft PR setup](docs/product-008/github-demo.md). The workflow runs on newly opened/reopened trusted-user issues, uses hosted Valkey from Actions secrets, supports deterministic shipping threshold changes, and stops at a draft PR for human review.
