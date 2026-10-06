@@ -80,6 +80,7 @@ export interface Diagnosis {
   acceptanceCriteria?: string[];
   risks?: string[];
   questions?: string[];
+  assumptions?: string[];
 }
 export interface Criterion {
   id: string;
@@ -93,6 +94,7 @@ export interface Draft {
   acceptanceCriteria: Criterion[];
   risks: string[];
   verificationNotes: string[];
+  assumptions?: string[];
   contextHashes: Record<string, string | null>;
   acceptanceHash: string;
 

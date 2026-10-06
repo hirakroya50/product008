@@ -99,7 +99,7 @@ Mode: ${d.mode === "openai" ? "Repository-aware AI implementation and independen
 ${changed.length ? changed.map((p) => `- \`${p}\`: ${d.rationale[p]}`).join("\n") : "Requested behavior is already present; no new changes."}
 ${unchanged.length ? `\nInspected and retained without changes: ${unchanged.map((p) => `\`${p}\``).join(", ")}.` : ""}
 
-## Acceptance evidence
+${d.assumptions?.length ? `## Implementation assumptions\n${d.assumptions.map((assumption) => `- ${assumption}`).join("\n")}\n\n` : ""}## Acceptance evidence
 ${review.criteria.map((c) => `- **${c.id}**: ${d.acceptanceCriteria.find((a) => a.id === c.id)?.description} — ${c.status}. ${c.evidence}`).join("\n")}
 
 ## Verification

@@ -43,7 +43,9 @@ export async function fitter(
     !diagnosis.acceptanceCriteria?.length ||
     diagnosis.questions?.length
   )
-    throw new Error("Issue requires clarification; see diagnosis.json");
+    throw new Error(
+      `Issue requires clarification: ${diagnosis.questions?.length ? diagnosis.questions.join("; ") : diagnosis.reason}. See diagnosis.json`,
+    );
   const mode = harnessMode();
   if (diagnosis.mode !== mode)
     throw new Error("Mode changed after triage; restart triage");
@@ -148,6 +150,7 @@ it("AC-3 responds to real cart quantity changes", () => {
     acceptanceCriteria: criteria,
     risks: plan.risks,
     verificationNotes: plan.verificationNotes,
+    assumptions: diagnosis.assumptions ?? [],
     paths,
     hashes: Object.fromEntries(paths.map((p) => [p, hash(safePath(p))])),
     contextHashes: context.hashes,

@@ -11,6 +11,7 @@ import {
   qualityHash,
 } from "../harness/quality";
 import { safePath, write, read, workDir, type Draft } from "../harness/common";
+import * as repository from "../harness/repository";
 import { validatePaths } from "../harness/repository";
 import { reviewPassed, reviewer } from "../harness/workers/reviewer";
 import { triager } from "../harness/workers/triager";
@@ -70,6 +71,66 @@ function reply(value: unknown) {
     output_text: JSON.stringify(value),
     usage: { total_tokens: 10 },
   };
+}
+const shippingCopyQuestion =
+  "Should the Navbar announcement and the App benefits text also change from $75 to $250, or is the requested change intentionally limited to the shipping progress banner?";
+function reportedShippingDiagnosis() {
+  return {
+    severity: "medium",
+    subsystems: [
+      "ShippingProgress component",
+      "CartDrawer shipping integration",
+      "Shipping regression tests",
+      "Navbar and benefits promotional copy",
+    ],
+    actionable: false,
+    reproducible: true,
+    reason:
+      "The free-shipping threshold is defined as 75 in src/components/ShippingProgress.tsx, and the shipping tests assert 75-specific progress, messaging, and cart-subtotal values. The CartDrawer derives the banner subtotal through the existing subtotal function, so the threshold can be changed without altering subtotal or stock logic. Navbar and App also contain customer-facing $75 shipping copy that may become inconsistent.",
+    acceptanceCriteria: [
+      "The shipping progress banner uses a $250 threshold.",
+      "A subtotal of $250 displays the unlocked free-shipping message and 100% progress.",
+      "Subtotals below $250 display the correct remaining dollar amount.",
+      "Progress remains clamped between 0% and 100%, including negative subtotals and subtotals above $250.",
+      "CartDrawer continues to pass the calculated cart subtotal to the shipping banner without changing subtotal calculations.",
+      "Existing stock limits and quantity behavior remain unchanged.",
+      "Shipping regression tests are updated to cover the $250 threshold, boundary behavior, remaining amount, clamping, and CartDrawer integration.",
+      "Any customer-facing shipping threshold copy that is intended to describe the same offer is updated consistently, or its exclusion is documented.",
+    ],
+    risks: [
+      "Leaving the Navbar announcement or App benefits text at $75 would present contradictory shipping information.",
+      "Updating threshold-related tests incorrectly could mask regressions in subtotal calculation or progress clamping.",
+      "Changes outside the shipping banner could unintentionally affect unrelated cart or stock behavior.",
+    ],
+    questions: [shippingCopyQuestion],
+  };
+}
+function shippingFixture(
+  body = "Update the shipping progress banner to use a $250 threshold. Preserve stock limits and subtotal calculations.",
+) {
+  const id = fixture();
+  write(id, "intake.json", {
+    title: "Change the free shipping threshold to $250",
+    body,
+    labels: [],
+    issueId: "12",
+    workId: id,
+  });
+  vi.spyOn(repository, "repositoryContext").mockReturnValue({
+    inventory: [
+      "src/components/ShippingProgress.tsx",
+      "src/components/Navbar.tsx",
+      "src/App.tsx",
+    ],
+    sources: {
+      "src/components/ShippingProgress.tsx":
+        "export const FREE_SHIPPING_THRESHOLD = 75;",
+      "src/components/Navbar.tsx": "<p>Free shipping on orders $75+</p>",
+      "src/App.tsx": "<p>Free shipping over $75</p>",
+    },
+    hashes: {},
+  });
+  return id;
 }
 afterEach(() => {
   vi.restoreAllMocks();
@@ -226,9 +287,134 @@ describe("repository-aware scope", () => {
     expect(create.mock.calls[1][0].input).toContain("originalSources");
     expect(create.mock.calls[1][0].input).toContain("finalSources");
   });
+  it("resolves the exact issue #12 triage failure and plans all shipping offer touchpoints", async () => {
+    aiMode();
+    const id = shippingFixture();
+    create.mockResolvedValueOnce(reply(reportedShippingDiagnosis()));
+    create.mockResolvedValueOnce(
+      reply({
+        supported: true,
+        reason: "One threshold governs the same shipping offer",
+        resolutions: [
+          {
+            question: shippingCopyQuestion,
+            blocking: false,
+            assumption:
+              "Update the Navbar and App free-shipping copy to $250 along with the banner.",
+            rationale:
+              "The issue changes the free-shipping threshold and existing source describes the same offer in all three locations.",
+          },
+        ],
+      }),
+    );
+    const diagnosis = await triager(id, true);
+    expect(diagnosis.actionable).toBe(true);
+    expect(diagnosis.questions).toEqual([]);
+    expect(diagnosis.assumptions?.[0]).toContain("Navbar and App");
+    expect(
+      read<{ actionable: boolean }>(id, "triage-initial.json").actionable,
+    ).toBe(false);
+    expect(
+      read<{ supported: boolean }>(id, "triage-resolution.json").supported,
+    ).toBe(true);
+    const planned = [
+      "src/components/ShippingProgress.tsx",
+      "src/components/CartDrawer.tsx",
+      "src/components/Navbar.tsx",
+      "src/App.tsx",
+      "src/__tests__/shipping.test.tsx",
+    ];
+    create.mockResolvedValueOnce(
+      reply({
+        summary: "Apply the $250 offer consistently",
+        files: planned.map((path) => ({
+          path,
+          reason: "Shipping offer implementation and regression coverage",
+        })),
+        risks: ["Preserve cart subtotal and stock"],
+        verificationNotes: [],
+      }),
+    );
+    create.mockResolvedValueOnce(
+      reply({
+        code:
+          "import {it,expect} from 'vitest'; import {FREE_SHIPPING_THRESHOLD} from '../components/ShippingProgress';" +
+          diagnosis
+            .acceptanceCriteria!.map(
+              (_, i) =>
+                `it('AC-${i + 1} shipping criterion',()=>{expect(FREE_SHIPPING_THRESHOLD).toBe(250);});`,
+            )
+            .join("\n"),
+      }),
+    );
+    const draft = await fitter(id, undefined, true);
+    expect(draft.paths).toEqual(planned);
+    expect(draft.assumptions).toEqual(diagnosis.assumptions);
+    expect(draft.acceptanceCriteria).toHaveLength(8);
+    expect(create.mock.calls.map((c) => c[0].text.format.name)).toEqual([
+      "triager",
+      "triage_resolution",
+      "fitter",
+      "acceptance_tests",
+    ]);
+    expect(
+      JSON.parse(create.mock.calls[2][0].input).diagnosis.assumptions[0],
+    ).toContain("$250");
+  });
+  it("preserves an explicit exclusion instead of widening the shipping change", async () => {
+    aiMode();
+    const id = shippingFixture(
+      "Update only the banner to $250. Do not change Navbar or App promotional copy; they describe a separate offer.",
+    );
+    create.mockResolvedValueOnce(reply(reportedShippingDiagnosis()));
+    create.mockResolvedValueOnce(
+      reply({
+        supported: true,
+        reason: "The issue explicitly defines the scope",
+        resolutions: [
+          {
+            question: shippingCopyQuestion,
+            blocking: false,
+            assumption:
+              "Leave Navbar and App copy unchanged as explicitly requested.",
+            rationale:
+              "The issue says those locations describe a separate offer and excludes them.",
+          },
+        ],
+      }),
+    );
+    const diagnosis = await triager(id, true);
+    expect(diagnosis.actionable).toBe(true);
+    expect(diagnosis.assumptions?.[0]).toContain("unchanged");
+    expect(JSON.parse(create.mock.calls[1][0].input).issue.body).toContain(
+      "Do not change Navbar or App",
+    );
+    expect(create.mock.calls[1][0].instructions).toContain(
+      "Respect explicit exclusions",
+    );
+  });
+  it("rejects a resolution that omits or fails to justify a triage question", async () => {
+    aiMode();
+    const id = shippingFixture();
+    create.mockResolvedValueOnce(reply(reportedShippingDiagnosis()));
+    create.mockResolvedValueOnce(
+      reply({ supported: true, reason: "Proceed", resolutions: [] }),
+    );
+    await expect(triager(id, true)).rejects.toThrow(
+      "Incomplete triage question resolution",
+    );
+    expect(fs.existsSync(path.join(workDir(id), "diagnosis.json"))).toBe(false);
+  });
   it("stops ambiguous requirements before planning", async () => {
     aiMode();
     const id = fixture();
+    write(id, "intake.json", {
+      title: "Add price rounding",
+      body: "Handle fractional prices according to company policy.",
+      labels: [],
+      issueId: "1",
+      workId: id,
+    });
     create.mockResolvedValueOnce(
       reply({
         severity: "enhancement",
@@ -241,9 +427,24 @@ describe("repository-aware scope", () => {
         questions: ["Round each item or the final subtotal?"],
       }),
     );
+    create.mockResolvedValueOnce(
+      reply({
+        supported: true,
+        reason: "Company rounding policy is not in the issue or source",
+        resolutions: [
+          {
+            question: "Round each item or the final subtotal?",
+            blocking: true,
+            assumption: "",
+            rationale:
+              "This choice changes charged totals and requires the company policy.",
+          },
+        ],
+      }),
+    );
     expect((await triager(id, true)).actionable).toBe(false);
     await expect(fitter(id, undefined, true)).rejects.toThrow("clarification");
-    expect(create).toHaveBeenCalledTimes(1);
+    expect(create).toHaveBeenCalledTimes(2);
   });
   it("rejects a planner that requests harness changes", async () => {
     aiMode();
