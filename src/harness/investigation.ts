@@ -4,6 +4,14 @@ import { read, workDir } from "./common";
 import type { TestRecord } from "./workers/tester";
 
 export function inspect(id: string) {
+  const dir = workDir(id);
+  const artifacts = fs.existsSync(dir)
+    ? fs
+        .readdirSync(dir)
+        .filter((file) => fs.statSync(path.join(dir, file)).isFile())
+        .sort()
+        .map((file) => `work/${id}/${file}`)
+    : [];
   const providerFile = path.join(workDir(id), "api-failure.json");
   const provider = fs.existsSync(providerFile)
     ? read<{ action: string; message: string; kind: string }>(
@@ -27,7 +35,11 @@ export function inspect(id: string) {
       status: provider
         ? "failed"
         : (progress?.status ??
-          (progress?.currentCheck ? "running" : "unknown")),
+          (progress?.currentCheck ? "running" : "missing-artifacts")),
+      message:
+        !provider && !progress
+          ? `No saved test or API diagnostics found locally for ${id}. Download the artifact from the matching GitHub Actions run and extract its work/${id} folder into this checkout's work directory, then inspect again. Verify the work ID against that run's logs.`
+          : undefined,
       cycle: progress?.cycle ?? 0,
       checks: progress?.completedChecks ?? [],
       failures: provider
@@ -40,16 +52,14 @@ export function inspect(id: string) {
             },
           ]
         : [],
-      artifacts: [
-        `work/${id}/api-failure.json`,
-        `work/${id}/acceptance-generation-*.json`,
-      ],
+      artifacts,
       provider,
     };
   }
   const record = read<TestRecord>(id, "test-record.json");
   const failed = record.checks.filter((check) => check.status !== "passed");
   return {
+    message: undefined,
     provider,
     workId: id,
     status: record.status,
@@ -64,12 +74,7 @@ export function inspect(id: string) {
       failures: check.failures,
       log: check.log,
     })),
-    artifacts: [
-      `work/${id}/candidate-cycle-${record.cycle}.json`,
-      `work/${id}/acceptance-tests.json`,
-      `work/${id}/test-cycle-${record.cycle}.json`,
-      `work/${id}/cycles.json`,
-    ],
+    artifacts,
   };
 }
 export function investigationSummary(id: string, reason: string) {

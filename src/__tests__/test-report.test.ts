@@ -46,6 +46,28 @@ afterEach(() => {
     fs.rmSync(workDir(id), { recursive: true, force: true });
 });
 describe("failed Vitest evidence", () => {
+  it("explains missing local Actions artifacts without inventing files", () => {
+    const id = `work-report-${randomUUID()}`;
+    const result = inspect(id);
+    expect(result.status).toBe("missing-artifacts");
+    expect(result.message).toContain("matching GitHub Actions run");
+    expect(result.artifacts).toEqual([]);
+    expect(fs.existsSync(workDir(id))).toBe(false);
+  });
+  it("reports saved quota failures even before testing starts", () => {
+    const id = fixture();
+    write(id, "api-failure.json", {
+      kind: "quota",
+      message: "429 You have no credits remaining",
+      action: "Restore API billing before rerunning",
+    });
+    const result = inspect(id);
+    expect(result.status).toBe("failed");
+    expect(result.provider?.kind).toBe("quota");
+    expect(result.failures[0].log).toContain("Restore API billing");
+    expect(result.artifacts).toContain(`work/${id}/api-failure.json`);
+    expect(result.artifacts.some((file) => file.includes("*"))).toBe(false);
+  });
   it("preserves assertion errors even when the Vitest command exits nonzero", () => {
     const id = fixture();
     const source = path.join(workDir(id), "sandbox-results.json");
