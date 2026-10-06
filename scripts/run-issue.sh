@@ -4,7 +4,18 @@ cd "$(dirname "$0")/.."
 issue_number="${1:?Usage: bash scripts/run-issue.sh ISSUE_NUMBER}"
 [[ "$issue_number" =~ ^[0-9]+$ ]] || { echo 'Numeric issue number required' >&2; exit 1; }
 [[ -z "$(git status --porcelain)" ]] || { echo 'Issue runner requires a clean committed checkout' >&2; exit 1; }
-export HARNESS_MODE=offline
+export HARNESS_MODE="${HARNESS_MODE:-offline}"
+case "$HARNESS_MODE" in
+  offline) ;;
+  openai)
+    [[ -n "${OPENAI_API_KEY:-}" && -n "${OPENAI_MODEL:-}" ]] || {
+      echo 'OpenAI mode requires OPENAI_API_KEY and OPENAI_MODEL.' >&2
+      exit 1
+    }
+    ;;
+  *) echo 'HARNESS_MODE must be offline or openai.' >&2; exit 1 ;;
+esac
+printf 'Harness mode: %s\n' "$HARNESS_MODE"
 harness() { node --import tsx src/harness/cli.ts "$@"; }
 harness doctor
 harness lease-probe

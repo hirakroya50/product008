@@ -7,7 +7,7 @@ import type { TestRecord } from "./workers/tester";
 const names = [
   "Workspace clean",
   "Typecheck passes",
-  "Offline test pass",
+  "Sandboxed test pass",
   "Lease acquire/release",
   "Triager diagnosis valid",
   "Fitter plan bounded",
@@ -56,7 +56,7 @@ export async function collect(id: string, file: string) {
   const passed = [
     audit.initialClean,
     tests.checks.find((c) => c.name === "typecheck")?.status === "passed",
-    patch.mode === "offline" &&
+    ["offline", "openai"].includes(patch.mode) &&
       tests.checks.find((c) => c.name === "test")?.status === "passed",
     lease.status === "passed",
     diagnosis.actionable && diagnosis.reproducible,

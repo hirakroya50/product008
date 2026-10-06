@@ -1,5 +1,11 @@
 # GitHub issue → draft PR demo
 
+## Selecting the developer mode
+
+The default is the deterministic offline demo described below. To use OpenAI, set the repository Actions secret or variable `HARNESS_MODE` to `openai`, add the secret `OPENAI_API_KEY`, and set the secret or variable `OPENAI_MODEL` to your Responses API model ID. Secrets take precedence over variables. The workflow explicitly passes these settings to the runner; your local `.env` is not available on GitHub. Commit and push the workflow and runner changes to the default branch, then start a new run by reopening an issue or using Run workflow. OpenAI calls incur API usage charges; the script records cost approval in the fitter plan.
+
+For local execution, load `.env` with `set -a; source .env; set +a` before running the script. The script respects `HARNESS_MODE`, validates OpenAI configuration, and prints the selected mode. The readiness check validates configuration without making an API call; `patch-record.json` records the mode actually used by Developer. Both modes retain the same bounded shipping issue scope and sandboxed test checks.
+
 Push this workflow and the harness changes to the repository's default branch before creating the test issue. The default branch may be `main` or the currently selected branch; the workflow discovers it automatically. GitHub issue events only run workflows present on the default branch.
 
 1. Rotate the hosted Valkey password if it was shared in chat. In GitHub repository Settings → Secrets and variables → Actions, add a repository secret named `VALKEY_URL` with the complete newly issued `rediss://...` connection URL. Preserve the provider's hostname, credentials and port exactly. Do not commit `.env` or put this URL in an issue.

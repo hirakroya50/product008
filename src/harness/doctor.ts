@@ -4,6 +4,16 @@ import OpenAI from "openai";
 import { run } from "./common";
 import { leaseProbe } from "./lease";
 export async function doctor(aiProbe = false) {
+  const mode =
+    process.env.HARNESS_MODE ??
+    (process.env.OPENAI_API_KEY ? "openai" : "offline");
+  if (!["offline", "openai"].includes(mode))
+    throw new Error("Unknown HARNESS_MODE");
+  if (
+    mode === "openai" &&
+    (!process.env.OPENAI_API_KEY || !process.env.OPENAI_MODEL)
+  )
+    throw new Error("OpenAI mode requires OPENAI_API_KEY and OPENAI_MODEL");
   const checks: Record<string, unknown> = {
     node: {
       status:
@@ -54,7 +64,10 @@ export async function doctor(aiProbe = false) {
   } else
     checks.inference = {
       status: "passed",
-      adapter: "deterministic offline shipping implementation",
+      adapter:
+        mode === "openai"
+          ? "openai; configuration checked only"
+          : "deterministic offline shipping implementation",
       liveProbe: false,
     };
   if (
