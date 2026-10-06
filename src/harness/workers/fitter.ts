@@ -20,6 +20,7 @@ import {
   qualityHash,
   type AcceptanceTests,
 } from "../quality";
+import { prepareAcceptance } from "./acceptance";
 import { format } from "prettier";
 export const shippingPaths = [
   "src/components/CartDrawer.tsx",
@@ -105,12 +106,12 @@ export async function fitter(
     throw new Error("Acceptance criteria must be bounded (1..12)");
   let acceptance: AcceptanceTests;
   if (mode === "openai") {
-    acceptance = await ask<AcceptanceTests>(
+    acceptance = await prepareAcceptance(
       id,
-      "acceptance_tests",
-      "Act as an independent test engineer before implementation. Write executable Vitest / React Testing Library tests based on the requirements and existing public interfaces. Imports are relative to src/__tests__/issue-acceptance.test.tsx. Each acceptance criterion must have a top-level it or test whose literal name starts with its AC-N ID followed by a space. Test observable behavior, boundary and regression cases. Use real assertions and real implementation. Do not mock/spy on application code, skip tests, use placeholders or assert true equals true. Keep imports compatible with planned paths and existing repository APIs. Do not duplicate a new implementation inside tests.",
-      { diagnosis, criteria, plan, repository: context },
-      objectSchema({ code: stringSchema }),
+      diagnosis,
+      criteria,
+      plan,
+      context,
     );
   } else {
     const threshold = shippingRequest(diagnosis.issue)!.threshold;

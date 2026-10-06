@@ -77,6 +77,16 @@ jobs:
           printf 'Draft PR awaiting human review: %s\n' "$pr_url" >> "$GITHUB_STEP_SUMMARY"
           printf 'If GitHub shows an Approve workflows to run banner, approve the PR quality run and wait for it to pass before merging.\n' >> "$GITHUB_STEP_SUMMARY"
           printf '%s\n' "$pr_url" > "work/$WORK_ID/pr-url.txt"
+      - name: Show investigation details on failure
+        if: failure() && steps.engine.outputs.work_id != ''
+        env:
+          WORK_ID: ${{ steps.engine.outputs.work_id }}
+        run: |
+          if [[ -f "work/$WORK_ID/investigation.md" ]]; then
+            cat "work/$WORK_ID/investigation.md" >> "$GITHUB_STEP_SUMMARY"
+          elif [[ -f "work/$WORK_ID/test-record.json" || -f "work/$WORK_ID/api-failure.json" ]]; then
+            pnpm harness inspect --work "$WORK_ID"
+          fi
       - name: Preserve work records, logs and acceptance evidence
         if: always()
         uses: actions/upload-artifact@v4

@@ -10,11 +10,19 @@ import {
   requiredChecks,
   qualityHash,
 } from "../harness/quality";
-import { safePath, write, read, workDir, type Draft } from "../harness/common";
+import {
+  safePath,
+  write,
+  read,
+  workDir,
+  type Draft,
+  type Issue,
+} from "../harness/common";
 import * as repository from "../harness/repository";
 import { validatePaths } from "../harness/repository";
 import { reviewPassed, reviewer } from "../harness/workers/reviewer";
 import { triager } from "../harness/workers/triager";
+import { prepareAcceptance } from "../harness/workers/acceptance";
 import { fitter } from "../harness/workers/fitter";
 import { developer } from "../harness/workers/developer";
 import { ask, objectSchema, stringSchema } from "../harness/ai";
@@ -132,6 +140,17 @@ function shippingFixture(
   });
   return id;
 }
+function approvedAcceptance(descriptions: { id: string }[]) {
+  return reply({
+    valid: true,
+    findings: [],
+    criteria: descriptions.map((c) => ({
+      id: c.id,
+      status: "covered",
+      evidence: "Real behavior is asserted",
+    })),
+  });
+}
 afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllEnvs();
@@ -210,6 +229,17 @@ describe("repository-aware scope", () => {
         code: `import {it,expect} from 'vitest'; import {subtotal} from '../cart'; it('AC-1 handles empty cart',()=>{expect(subtotal([])).toBe(0);});`,
       }),
     );
+    const savedDiagnosis = read<{ acceptanceCriteria: string[] }>(
+      id,
+      "diagnosis.json",
+    );
+    create.mockResolvedValueOnce(
+      approvedAcceptance(
+        savedDiagnosis.acceptanceCriteria.map((_, i) => ({
+          id: `AC-${i + 1}`,
+        })),
+      ),
+    );
     const draft = await fitter(id, undefined, true);
     expect(draft.paths).toEqual([
       "src/cart.ts",
@@ -221,6 +251,7 @@ describe("repository-aware scope", () => {
       "triager",
       "fitter",
       "acceptance_tests",
+      "acceptance_review",
     ]);
     expect(
       create.mock.calls.every(
@@ -347,6 +378,17 @@ describe("repository-aware scope", () => {
             .join("\n"),
       }),
     );
+    const savedDiagnosis = read<{ acceptanceCriteria: string[] }>(
+      id,
+      "diagnosis.json",
+    );
+    create.mockResolvedValueOnce(
+      approvedAcceptance(
+        savedDiagnosis.acceptanceCriteria.map((_, i) => ({
+          id: `AC-${i + 1}`,
+        })),
+      ),
+    );
     const draft = await fitter(id, undefined, true);
     expect(draft.paths).toEqual(planned);
     expect(draft.assumptions).toEqual(diagnosis.assumptions);
@@ -356,6 +398,7 @@ describe("repository-aware scope", () => {
       "triage_resolution",
       "fitter",
       "acceptance_tests",
+      "acceptance_review",
     ]);
     expect(
       JSON.parse(create.mock.calls[2][0].input).diagnosis.assumptions[0],
@@ -480,6 +523,71 @@ describe("repository-aware scope", () => {
 });
 
 describe("acceptance and review gates", () => {
+  it("rejects the live duplicate-status test and permits properly isolated renders", () => {
+    const faulty = `it('AC-1 state changes',()=>{render(<ShippingProgress subtotal={0}/>);expect(screen.getByRole('status')).toBeTruthy();render(<ShippingProgress subtotal={250}/>);expect(screen.getByRole('status')).toBeTruthy();});`;
+    expect(() => validateAcceptance({ code: faulty }, criteria)).toThrow(
+      "multiple roots",
+    );
+    const rerender = `it('AC-1 state changes',()=>{const view=render(<ShippingProgress subtotal={0}/>);expect(screen.getByRole('status')).toBeTruthy();view.rerender(<ShippingProgress subtotal={250}/>);expect(screen.getByRole('status')).toBeTruthy();});`;
+    expect(() =>
+      validateAcceptance({ code: rerender }, criteria),
+    ).not.toThrow();
+    const unmount = faulty
+      .replace(
+        "render(<ShippingProgress subtotal={0}/>)",
+        "const view=render(<ShippingProgress subtotal={0}/>)",
+      )
+      .replace(
+        "render(<ShippingProgress subtotal={250}/>)",
+        "view.unmount();render(<ShippingProgress subtotal={250}/>)",
+      );
+    expect(() => validateAcceptance({ code: unmount }, criteria)).not.toThrow();
+  });
+  it("regenerates invalid acceptance tests before freezing their contract", async () => {
+    aiMode();
+    const id = fixture();
+    write(id, "cost-approval.json", { approvedCost: true });
+    create.mockResolvedValueOnce(
+      reply({
+        code: `it('AC-1 behavior',()=>{render(<A/>);render(<B/>);expect(screen.getByRole('status')).toBeTruthy();});`,
+      }),
+    );
+    create.mockResolvedValueOnce(
+      reply({
+        code: `it('AC-1 behavior',()=>{expect(subtotal([])).toBe(0);});`,
+      }),
+    );
+    create.mockResolvedValueOnce(approvedAcceptance(criteria));
+    const diagnosis = {
+      issue: read<Issue>(id, "intake.json"),
+      actionable: true,
+      reason: "Subtotal",
+      severity: "bug",
+      subsystems: ["cart"],
+      reproducible: true,
+    };
+    const tests = await prepareAcceptance(
+      id,
+      diagnosis,
+      criteria,
+      {},
+      repository.repositoryContext(),
+    );
+    expect(tests.code).toContain("subtotal([])");
+    expect(
+      read<{ findings: string[] }>(id, "acceptance-generation-0.json")
+        .findings[0],
+    ).toContain("multiple roots");
+    expect(create.mock.calls.map((c) => c[0].text.format.name)).toEqual([
+      "acceptance_tests",
+      "acceptance_tests",
+      "acceptance_review",
+    ]);
+    expect(
+      JSON.parse(create.mock.calls[1][0].input).validationFindings[0],
+    ).toContain("multiple roots");
+  });
+
   it("rejects missing, skipped, mocked and assertion-free acceptance tests", () => {
     const good = `it('AC-1 behavior', () => { expect(subtotal([])).toBe(0); });`;
     expect(() => validateAcceptance({ code: good }, criteria)).not.toThrow();
@@ -667,6 +775,39 @@ describe("API execution boundaries", () => {
       ask(id, "triager", "test", {}, objectSchema({ value: stringSchema })),
     ).rejects.toThrow();
     expect(create).not.toHaveBeenCalled();
+  });
+  it("retries a temporary rate limit and records each request against the budget", async () => {
+    aiMode();
+    const id = fixture();
+    write(id, "cost-approval.json", { approvedCost: true });
+    vi.useFakeTimers();
+    try {
+      create.mockRejectedValueOnce({
+        status: 429,
+        headers: new Headers({ "retry-after": "1" }),
+      });
+      create.mockResolvedValueOnce(reply({ value: "ok" }));
+      const result = ask<{ value: string }>(
+        id,
+        "triager",
+        "test",
+        {},
+        objectSchema({ value: stringSchema }),
+      );
+      await vi.advanceTimersByTimeAsync(1500);
+      expect(await result).toEqual({ value: "ok" });
+      const ledger = read<{
+        calls: { status: string; retryDelayMs: number }[];
+      }>(id, "api-usage.json");
+      expect(ledger.calls.map((c) => c.status)).toEqual([
+        "retrying",
+        "completed",
+      ]);
+      expect(ledger.calls[0].retryDelayMs).toBeGreaterThanOrEqual(1000);
+      expect(create).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
   });
   it("caps paid requests, including failed calls", async () => {
     aiMode();

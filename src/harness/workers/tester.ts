@@ -9,16 +9,19 @@ import {
   fingerprint,
   hash,
   safePath,
+  workDir,
+  run,
   type Draft,
 } from "../common";
 import {
   acceptancePath,
-  acceptanceReportPassed,
   validateAcceptance,
   qualityHash,
   type AcceptanceTests,
 } from "../quality";
 import { reviewer } from "./reviewer";
+import { preserveTestReport, type TestFailure } from "../test-report";
+import { sourcesFor } from "../repository";
 export interface TestRecord {
   status: string;
   cycle: number;
@@ -33,6 +36,10 @@ export interface TestRecord {
     exitCode: number | null;
     durationMs: number;
     log: string;
+    report?: string;
+    failures?: TestFailure[];
+    signal?: string | null;
+    failureKind?: "provider";
   }[];
 }
 export async function tester(id: string, cycle = 0) {
@@ -54,6 +61,11 @@ export async function tester(id: string, cycle = 0) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "product008-test-"));
   const physical = fs.realpathSync(dir);
   const checks: TestRecord["checks"] = [];
+  write(id, `candidate-cycle-${cycle}.json`, sourcesFor(draft.paths));
+  fs.writeFileSync(
+    path.join(workDir(id), `candidate-cycle-${cycle}.patch`),
+    run("git", ["diff", "HEAD"]),
+  );
   try {
     for (const p of [
       "src",
@@ -91,6 +103,7 @@ export async function tester(id: string, cycle = 0) {
           "exec",
           "vitest",
           "run",
+          "--maxWorkers=2",
           "--reporter=json",
           "--outputFile=regression-results.json",
         ],
@@ -103,6 +116,7 @@ export async function tester(id: string, cycle = 0) {
           "vitest",
           "run",
           acceptancePath,
+          "--maxWorkers=2",
           "--reporter=json",
           "--outputFile=acceptance-results.json",
         ],
@@ -110,6 +124,19 @@ export async function tester(id: string, cycle = 0) {
     ];
     for (const { name, args } of commands) {
       const now = Date.now();
+      process.stderr.write(
+        `Tester cycle ${cycle}: starting ${name} (180s limit)\n`,
+      );
+      write(id, "test-progress.json", {
+        cycle,
+        fingerprint: snapshot,
+        currentCheck: name,
+        startedAt: new Date(now).toISOString(),
+        completedChecks: checks.map((check) => ({
+          name: check.name,
+          status: check.status,
+        })),
+      });
       if (name === "format" && changed.length === 0) {
         checks.push({
           name,
@@ -131,6 +158,9 @@ export async function tester(id: string, cycle = 0) {
             TMPDIR: dir,
             CI: "true",
             NO_COLOR: "1",
+            NODE_OPTIONS: "--max-old-space-size=512",
+            GOMAXPROCS: "2",
+            GOMEMLIMIT: "256MiB",
           },
           encoding: "utf8",
           timeout: 180000,
@@ -140,37 +170,47 @@ export async function tester(id: string, cycle = 0) {
       );
       let passed = result.status === 0 && !result.error;
       let detail = "";
-      if (passed && (name === "acceptance" || name === "test")) {
-        try {
-          const report = JSON.parse(
-            fs.readFileSync(
-              path.join(
-                dir,
-                name === "acceptance"
-                  ? "acceptance-results.json"
-                  : "regression-results.json",
-              ),
-              "utf8",
-            ),
-          );
-          passed = acceptanceReportPassed(report, draft.acceptanceCriteria);
-          detail = `\nReported tests: ${report.numTotalTests}; passed: ${report.numPassedTests}; pending: ${report.numPendingTests}. Every criterion must run and pass; skipped tests fail the gate.`;
-        } catch {
-          passed = false;
-          detail = "Missing or invalid machine-readable test report";
-        }
+      let reportArtifact: string | undefined;
+      let failures: TestFailure[] | undefined;
+      // Vitest writes failure details to JSON even when its process exits nonzero.
+      if (name === "acceptance" || name === "test") {
+        const reportFile = path.join(
+          dir,
+          name === "acceptance"
+            ? "acceptance-results.json"
+            : "regression-results.json",
+        );
+        const report = preserveTestReport(
+          id,
+          name,
+          cycle,
+          reportFile,
+          draft.acceptanceCriteria,
+          passed,
+        );
+        passed = report.passed;
+        detail = report.detail;
+        reportArtifact = report.artifact;
+        failures = report.failures;
       }
       checks.push({
         name,
         status: passed ? "passed" : "failed",
         exitCode: passed ? 0 : result.status === 0 ? 1 : result.status,
         durationMs: Date.now() - now,
+        signal: result.signal,
+        report: reportArtifact,
+        failures,
         log:
           (result.stdout ?? "") +
           (result.stderr ?? "") +
           (result.error?.message ?? "") +
+          `\nProcess exit: ${result.status ?? "none"}; signal: ${result.signal ?? "none"}` +
           detail,
       });
+      process.stderr.write(
+        `Tester cycle ${cycle}: ${name} ${passed ? "passed" : "failed"}\n`,
+      );
     }
     const diff = spawnSync("git", ["diff", "HEAD", "--check"], {
       cwd: root,
@@ -189,17 +229,20 @@ export async function tester(id: string, cycle = 0) {
       throw new Error("Workspace changed during testing");
     let reviewLog = "Review deferred until executable checks pass";
     let reviewPassed = false;
+    let reviewProviderFailure = false;
     if (checks.every((c) => c.status === "passed")) {
       try {
         const review = await reviewer(id, checks, cycle);
         reviewPassed = review.status === "passed";
         reviewLog = JSON.stringify(review, null, 2);
       } catch (error) {
+        reviewProviderFailure = true;
         reviewLog = `Review failed: ${error instanceof Error ? error.message : String(error)}`;
       }
     }
     checks.push({
       name: "review",
+      failureKind: reviewProviderFailure ? "provider" : undefined,
       status: reviewPassed ? "passed" : "failed",
       exitCode: reviewPassed ? 0 : 1,
       durationMs: 0,
@@ -223,6 +266,14 @@ export async function tester(id: string, cycle = 0) {
       checks,
     } satisfies TestRecord);
     write(id, `test-cycle-${cycle}.json`, record);
+    write(id, "test-progress.json", {
+      cycle,
+      status: record.status,
+      completedChecks: checks.map((check) => ({
+        name: check.name,
+        status: check.status,
+      })),
+    });
     return record;
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });

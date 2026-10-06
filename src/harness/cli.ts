@@ -8,6 +8,7 @@ import { tester } from "./workers/tester";
 import { fixer } from "./workers/fixer";
 import { gate, verifyPublication } from "./git";
 import { doctor } from "./doctor";
+import { inspect } from "./investigation";
 import { collect, acceptance } from "./evidence";
 const [command, ...args] = process.argv.slice(2);
 const option = (name: string) => getOption(args, name);
@@ -52,6 +53,8 @@ async function main() {
     case "fixer":
       approve(args);
       return withLease(() => fixer(id()));
+    case "inspect":
+      return inspect(id());
     case "publication-check":
       return verifyPublication(id());
     case "git":
@@ -90,6 +93,7 @@ async function main() {
           "fitter --work work-id [--paths a,b,c] --approve-write --approve-cost",
           "acceptance-status file",
           "publication-check --work work-id",
+          "inspect --work work-id",
           "evidence --work work-id --approve-write",
         ],
       };

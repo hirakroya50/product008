@@ -86,7 +86,22 @@ export async function developer(id: string, repair = false) {
         sources: sourcesFor(draft.paths),
         originalSources: repair ? read(id, "source-backup.json") : undefined,
         acceptance: read(id, "acceptance-tests.json"),
-        failures: repair ? read(id, "test-record.json") : undefined,
+        failures: repair
+          ? read<TestRecord>(id, "test-record.json")
+              .checks.filter((check) => check.status !== "passed")
+              .map((check) => ({
+                name: check.name,
+                status: check.status,
+                report: check.report,
+                failures: check.failures?.map((failure) => ({
+                  ...failure,
+                  message: failure.message.slice(0, 6000),
+                })),
+                log: check.failures?.length
+                  ? undefined
+                  : check.log.slice(0, 8000),
+              }))
+          : undefined,
       },
       objectSchema(
         Object.fromEntries(draft.paths.map((p) => [p, stringSchema])),
