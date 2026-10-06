@@ -1,4 +1,4 @@
-name: Product 008 - Issue to draft PR
+name: Product 008 - Reviewed issue to draft PR
 on:
   issues:
     types: [opened, reopened]
@@ -24,7 +24,7 @@ jobs:
     runs-on: macos-15
     timeout-minutes: 40
     env:
-      HARNESS_MODE: ${{ secrets.HARNESS_MODE || vars.HARNESS_MODE || 'offline' }}
+      HARNESS_MODE: ${{ secrets.HARNESS_MODE || vars.HARNESS_MODE || 'openai' }}
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       OPENAI_MODEL: ${{ secrets.OPENAI_MODEL || vars.OPENAI_MODEL }}
       GH_TOKEN: ${{ github.token }}
@@ -58,7 +58,9 @@ jobs:
         env:
           WORK_ID: ${{ steps.engine.outputs.work_id }}
         run: |
+          pnpm harness publication-check --work "$WORK_ID"
           branch="$(git branch --show-current)"
+          title="$(cat "work/$WORK_ID/pr-title.txt")"
           ahead="$(git rev-list --count "origin/$BASE_BRANCH..HEAD")"
           if [[ "$ahead" == 0 ]]; then
             echo 'Requested change is already present; no new PR required.' >> "$GITHUB_STEP_SUMMARY"
@@ -67,11 +69,13 @@ jobs:
           git push --set-upstream origin "$branch"
           existing="$(gh pr list --head "$branch" --base "$BASE_BRANCH" --state open --json url --jq '.[0].url // empty')"
           if [[ -n "$existing" ]]; then
+            gh pr edit "$existing" --title "$title" --body-file "work/$WORK_ID/pr-summary.md"
             pr_url="$existing"
           else
-            pr_url="$(gh pr create --draft --base "$BASE_BRANCH" --head "$branch" --title "fix(store): resolve issue #$ISSUE_NUMBER [automated]" --body-file "work/$WORK_ID/pr-summary.md")"
+            pr_url="$(gh pr create --draft --base "$BASE_BRANCH" --head "$branch" --title "$title" --body-file "work/$WORK_ID/pr-summary.md")"
           fi
           printf 'Draft PR awaiting human review: %s\n' "$pr_url" >> "$GITHUB_STEP_SUMMARY"
+          printf 'If GitHub shows an Approve workflows to run banner, approve the PR quality run and wait for it to pass before merging.\n' >> "$GITHUB_STEP_SUMMARY"
           printf '%s\n' "$pr_url" > "work/$WORK_ID/pr-url.txt"
       - name: Preserve work records, logs and acceptance evidence
         if: always()

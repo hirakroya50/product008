@@ -1,6 +1,6 @@
 # Product 008 · ThreadCraft
 
-React 18 / TypeScript / Vite / Tailwind store with an offline autonomous SDLC demonstration.
+React 18 / TypeScript / Vite / Tailwind store with an issue-to-draft-PR harness and an explicit offline shipping demonstration.
 
 ```bash
 pnpm install
@@ -15,11 +15,11 @@ The demo requires a clean Git checkout and creates a local `codex/issue-*` branc
 
 ## Stage A pipeline
 
-Local JSON (`intake`) or GitHub CLI (`intake-issue`, requires authenticated `gh`) → Triager → Fitter → Developer → sandboxed Tester → bounded Fixer → Git commit → Markdown PR summary → human gate. Run `pnpm harness help` for commands. Use `--work work-ID` and explicit `--approve-write`; fitter additionally requires `--approve-cost`.
+Local JSON (`intake`) or GitHub CLI (`intake-issue`, requires authenticated `gh`) → repository-aware Triager → Fitter and independent acceptance tests → Developer → sandboxed Tester and independent reviewer → bounded Fixer → quality-gated Git commit → evidence-backed draft PR → maintainer review. Run `pnpm harness help` for commands. Use `--work work-ID` and explicit `--approve-write`; AI triage and fitter additionally require `--approve-cost`. AI triage saves approval before the first API request.
 
-Offline triage/developer support the sample $75 shipping progress feature. Unsupported requests stop for human clarification. `HARNESS_MODE=openai`, `OPENAI_API_KEY`, and an explicit `OPENAI_MODEL` enable the optional Responses API developer; API calls require the fitter's saved cost approval. `doctor --ai-probe` explicitly invokes paid inference. Standard doctor only verifies offline inference. No live API or Valkey validation is implied by offline success.
+Offline triage/developer support the sample $75 shipping progress feature. Unsupported requests stop for human clarification. `HARNESS_MODE=openai`, `OPENAI_API_KEY`, and an explicit `OPENAI_MODEL` enable repository-aware Responses API triage, planning, development, acceptance-test generation and independent review. Structured outputs use strict schemas, incomplete/refused responses fail closed, and the per-work API ledger limits execution to 16 requests with recorded usage. `doctor --ai-probe` explicitly invokes paid inference. Standard doctor only verifies offline inference. No live API or Valkey validation is implied by offline success.
 
-Runner: macOS native `sandbox-exec`, temporary copy, no network, writes restricted to the copy, stripped environment. It is a local demo sandbox sharing read access and dependencies with its host, not an adversarial production isolation boundary. Other platforms fail readiness until a runner adapter is implemented. Commands have 180-second limits and log capture; fixer has a maximum of three retries. Git requires fresh successful checks and rejects changes outside the plan. Draft hashes detect intervening edits. Work artifacts live in ignored `work/`.
+Runner: macOS native `sandbox-exec`, temporary copy, no network, writes restricted to the copy, stripped environment. It is a local demo sandbox sharing read access and dependencies with its host, not an adversarial production isolation boundary. Other platforms fail readiness until a runner adapter is implemented. Commands have 180-second limits and log capture; fixer has a maximum of three retries. Git requires fresh successful typecheck, build, regression, changed-file formatting, diff hygiene, independent acceptance tests and review checks, and rejects changes outside the plan. Skipped tests and blocking P0–P2 review findings fail the gate. Acceptance tests are saved before development, injected only into the sandbox and protected from Developer/Fixer edits. Test/review evidence is bound to the code fingerprint and artifact hashes; publication verifies the reviewed commit and clean branch. Plan and context hashes detect intervening edits. The Fixer receives failed check logs and review findings, saves every cycle, and stops early when a repair makes no code changes. Work artifacts live in ignored `work/`.
 
 Without `VALKEY_URL`, leases use an in-memory smoke adapter and an atomic filesystem lock for cross-process workspace edits. Filesystem locks deliberately do not expire; if a writer crashes, inspect the PID in `work/.workspace-lock/owner.json`, then remove the stale directory manually. Configured Valkey connection failures fail closed, with owner-checked renewal and release.
 
@@ -35,4 +35,12 @@ The optional API adapter follows the [official Responses API documentation](http
 
 ## Automatic GitHub issue demo
 
-See [GitHub issue to draft PR setup](docs/product-008/github-demo.md). The workflow runs on newly opened/reopened trusted-user issues, uses hosted Valkey from Actions secrets, supports deterministic shipping threshold changes, and stops at a draft PR for human review.
+See [GitHub issue to draft PR setup](docs/product-008/github-demo.md). The workflow runs on newly opened/reopened trusted-user issues, uses hosted Valkey from Actions secrets, defaults to AI mode for general application issues, supports explicit offline shipping mode, and stops at a draft PR for human review. PR quality CI reruns typecheck, tests, build, formatting and diff checks on each PR update.
+
+## Implementation scope and review expectations
+
+AI mode selects up to 24 justified paths across application `src/` code, styles, data, types, regression tests and Markdown documentation. At least one implementation path and one regression test path are required; there is no minimum changed-file count. Existing cart integration may correctly stay unchanged for a shipping threshold issue. The PR summary reports actual changed files and explains planned files retained without edits.
+
+The harness, pipeline tests, test setup, dependencies, secrets, CI and infrastructure are protected from generated patches. New dependencies, file deletions, migrations and changes outside this React/TypeScript application need a maintainer-directed workflow. Ambiguous issues stop at triage with questions in `diagnosis.json`; answer them in the issue and rerun.
+
+Independent tests and AI review improve evidence but cannot guarantee senior-engineer quality. Generated tests can still miss a requirement, and review can miss a defect. Visual/browser validation, external integration behavior and other manual checks are listed in the plan and PR. Configure branch protection to require **PR quality / quality** and maintainer approval. The current macOS runner is a demo isolation boundary, not a hardened runner for untrusted company repositories; see the runner limitations above before rollout.

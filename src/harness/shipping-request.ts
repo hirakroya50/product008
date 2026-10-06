@@ -14,8 +14,12 @@ export function shippingRequest(
   )
     return null;
   const match =
-    text.match(/threshold\s*(?:to|of|at|:|=)?\s*\$?(\d+(?:\.\d{1,2})?)(?![\d.])/i) ??
-    text.match(/\$(\d+(?:\.\d{1,2})?)(?![\d.])\s+(?:free\s+shipping\s+)?threshold/i);
+    text.match(
+      /threshold\s*(?:to|of|at|:|=)?\s*\$?(\d+(?:\.\d{1,2})?)(?![\d.])/i,
+    ) ??
+    text.match(
+      /\$(\d+(?:\.\d{1,2})?)(?![\d.])\s+(?:free\s+shipping\s+)?threshold/i,
+    );
   if (/threshold/i.test(text) && !match) return null;
   const threshold = match ? Number(match[1]) : 75;
   if (!Number.isFinite(threshold) || threshold < 10 || threshold > 1000)

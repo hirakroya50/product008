@@ -4,7 +4,7 @@ cd "$(dirname "$0")/.."
 issue_number="${1:?Usage: bash scripts/run-issue.sh ISSUE_NUMBER}"
 [[ "$issue_number" =~ ^[0-9]+$ ]] || { echo 'Numeric issue number required' >&2; exit 1; }
 [[ -z "$(git status --porcelain)" ]] || { echo 'Issue runner requires a clean committed checkout' >&2; exit 1; }
-export HARNESS_MODE="${HARNESS_MODE:-offline}"
+export HARNESS_MODE="${HARNESS_MODE:-openai}"
 case "$HARNESS_MODE" in
   offline) ;;
   openai)
@@ -24,8 +24,8 @@ work_id="$(printf '%s' "$intake" | node -e 'let s="";process.stdin.on("data",x=>
 printf '%s\n' "$work_id" > work/latest-issue-work-id.txt
 if [[ -n "${GITHUB_OUTPUT:-}" ]]; then printf 'work_id=%s\n' "$work_id" >> "$GITHUB_OUTPUT"; fi
 harness audit-start "$work_id" --approve-write
-harness triager "$work_id" --approve-write
-harness fitter --work "$work_id" --paths src/components/CartDrawer.tsx,src/components/ShippingProgress.tsx,src/__tests__/shipping.test.tsx --approve-write --approve-cost
+harness triager "$work_id" --approve-write --approve-cost
+harness fitter --work "$work_id" --approve-write --approve-cost
 harness developer "$work_id" --approve-write
 if ! harness tester "$work_id" --approve-write; then harness fixer "$work_id" --approve-write; fi
 harness git "$work_id" --approve-write

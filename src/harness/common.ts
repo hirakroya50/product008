@@ -37,16 +37,24 @@ export function write<T>(id: string, file: string, data: T): T {
 }
 export function safePath(p: string) {
   if (
-    !/^src\/(components|__tests__|data|types)\/[a-zA-Z0-9_./-]+\.(tsx?|json)$/.test(
+    typeof p !== "string" ||
+    !/^(?:src\/[a-zA-Z0-9_./-]+\.(?:tsx?|css|json)|docs\/[a-zA-Z0-9_./-]+\.md|README\.md)$/.test(
       p,
     ) ||
-    p.split("/").includes("..")
+    p.split("/").some((part) => part === ".." || part === "." || !part) ||
+    p.startsWith("src/harness/") ||
+    /^src\/__tests__\/(?:setup|harness|shipping-request|valkey|pipeline-quality|issue-acceptance)\./.test(
+      p,
+    )
   )
     throw new Error(`Path outside patch scope: ${p}`);
   const absolute = path.resolve(root, p);
   let parent = absolute;
   while (!fs.existsSync(parent)) parent = path.dirname(parent);
-  if (!fs.realpathSync(parent).startsWith(root + path.sep))
+  if (
+    fs.realpathSync(parent) !== root &&
+    !fs.realpathSync(parent).startsWith(root + path.sep)
+  )
     throw new Error("Symlink escape");
   return absolute;
 }
@@ -68,8 +76,26 @@ export interface Diagnosis {
   reason: string;
   reproducible: boolean;
   issue: Issue;
+  mode?: "offline" | "openai";
+  acceptanceCriteria?: string[];
+  risks?: string[];
+  questions?: string[];
+}
+export interface Criterion {
+  id: string;
+  description: string;
 }
 export interface Draft {
+  qualityVersion: 2;
+  mode: "offline" | "openai";
+  summary: string;
+  rationale: Record<string, string>;
+  acceptanceCriteria: Criterion[];
+  risks: string[];
+  verificationNotes: string[];
+  contextHashes: Record<string, string | null>;
+  acceptanceHash: string;
+
   paths: string[];
   hashes: Record<string, string | null>;
   constraints: string[];
@@ -81,9 +107,10 @@ export interface Draft {
 export function fingerprint() {
   return crypto
     .createHash("sha256")
-    .update(run("git", ["diff", "HEAD", "--", "src"]))
+    .update(run("git", ["rev-parse", "HEAD"]))
+    .update(run("git", ["diff", "HEAD"]))
     .update(
-      run("git", ["ls-files", "--others", "--exclude-standard", "src"])
+      run("git", ["ls-files", "--others", "--exclude-standard"])
         .split("\n")
         .filter(Boolean)
         .map((p) => p + hash(path.join(root, p)))

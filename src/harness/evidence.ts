@@ -60,7 +60,9 @@ export async function collect(id: string, file: string) {
       tests.checks.find((c) => c.name === "test")?.status === "passed",
     lease.status === "passed",
     diagnosis.actionable && diagnosis.reproducible,
-    draft.paths.length === 3,
+    draft.qualityVersion === 2 &&
+      draft.paths.length >= 2 &&
+      draft.paths.length <= 24,
     patch.applied,
     tests.status === "passed",
     clean && git.clean,
@@ -68,7 +70,9 @@ export async function collect(id: string, file: string) {
     fs.existsSync(path.join(workDir(id), "pr-summary.md")),
     audit.collisionDenied,
     tests.cycle <= 3,
-    tests.checks.length === 3 && tests.sandbox.includes("network denied"),
+    tests.checks.length === 7 &&
+      tests.checks.every((c) => c.status === "passed") &&
+      tests.sandbox.includes("network denied"),
     run("git", ["rev-parse", "HEAD"]) === git.sha,
   ];
   const artifacts = [

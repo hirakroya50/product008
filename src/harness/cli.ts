@@ -2,11 +2,11 @@ import { approve, run, write, getOption } from "./common";
 import { withLease, leaseProbe } from "./lease";
 import { intake, intakeIssue } from "./intake";
 import { triager } from "./workers/triager";
-import { fitter, shippingPaths } from "./workers/fitter";
+import { fitter } from "./workers/fitter";
 import { developer } from "./workers/developer";
 import { tester } from "./workers/tester";
 import { fixer } from "./workers/fixer";
-import { gate } from "./git";
+import { gate, verifyPublication } from "./git";
 import { doctor } from "./doctor";
 import { collect, acceptance } from "./evidence";
 const [command, ...args] = process.argv.slice(2);
@@ -33,11 +33,11 @@ async function main() {
       return withLease(async () => intakeIssue(args[0]));
     case "triager":
       approve(args);
-      return withLease(async () => triager(id()));
+      return withLease(() => triager(id(), args.includes("--approve-cost")));
     case "fitter":
       approve(args, true);
       return withLease(async () =>
-        fitter(id(), option("--paths")?.split(",") ?? shippingPaths, true),
+        fitter(id(), option("--paths")?.split(","), true),
       );
     case "developer":
       approve(args);
@@ -45,13 +45,15 @@ async function main() {
     case "tester":
       approve(args);
       return withLease(async () => {
-        const r = tester(id());
+        const r = await tester(id());
         if (r.status !== "passed") process.exitCode = 1;
         return r;
       });
     case "fixer":
       approve(args);
       return withLease(() => fixer(id()));
+    case "publication-check":
+      return verifyPublication(id());
     case "git":
       approve(args);
       return withLease(async () => gate(id()));
@@ -83,9 +85,11 @@ async function main() {
           "lease-probe",
           "intake file --approve-write",
           "intake-issue number --approve-write",
-          "triager|developer|tester|fixer|git work-id --approve-write",
-          "fitter --work work-id --paths a,b,c --approve-write --approve-cost",
+          "triager work-id --approve-write [--approve-cost]",
+          "developer|tester|fixer|git work-id --approve-write",
+          "fitter --work work-id [--paths a,b,c] --approve-write --approve-cost",
           "acceptance-status file",
+          "publication-check --work work-id",
           "evidence --work work-id --approve-write",
         ],
       };

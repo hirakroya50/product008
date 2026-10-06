@@ -1,0 +1,40 @@
+name: PR quality
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+permissions:
+  contents: read
+concurrency:
+  group: pr-quality-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      HARNESS_MODE: offline
+      CI: "true"
+      BASE_SHA: ${{ github.event.pull_request.base.sha }}
+      HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.26.2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Type checking
+        run: pnpm typecheck
+      - name: Regression tests
+        run: pnpm test
+      - name: Production build
+        run: pnpm build
+      - name: Changed-file formatting
+        run: node scripts/check-changed-format.mjs "$BASE_SHA" "$HEAD_SHA"
+      - name: Diff hygiene
+        run: git diff --check "$BASE_SHA" "$HEAD_SHA"
