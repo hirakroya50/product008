@@ -4,12 +4,31 @@ import { parsers } from "prettier/plugins/typescript";
 
 export interface AcceptanceTests {
   code: string;
+  manualVerification?: { criterionId: string; steps: string[] }[];
 }
 export const acceptancePath = "src/__tests__/issue-acceptance.test.tsx";
 export function validateAcceptance(
   tests: AcceptanceTests,
   criteria: Draft["acceptanceCriteria"],
 ) {
+  if (tests.manualVerification !== undefined) {
+    if (
+      !Array.isArray(tests.manualVerification) ||
+      tests.manualVerification.length > criteria.length ||
+      new Set(tests.manualVerification.map((check) => check.criterionId))
+        .size !== tests.manualVerification.length ||
+      tests.manualVerification.some(
+        (check) =>
+          !criteria.some((criterion) => criterion.id === check.criterionId) ||
+          !Array.isArray(check.steps) ||
+          !check.steps.length ||
+          check.steps.some((step) => typeof step !== "string" || !step.trim()),
+      )
+    )
+      throw new Error(
+        "Manual verification requires unique known criterion IDs and concrete pending steps",
+      );
+  }
   if (
     typeof tests.code !== "string" ||
     tests.code.length > 100000 ||

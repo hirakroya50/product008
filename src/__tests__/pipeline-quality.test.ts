@@ -526,6 +526,105 @@ describe("repository-aware scope", () => {
 });
 
 describe("acceptance and review gates", () => {
+  it("retains issue 17 visual checks in the frozen acceptance contract and draft", async () => {
+    aiMode();
+    const id = fixture();
+    const stylingCriteria = [
+      {
+        id: "AC-1",
+        description:
+          "Define radius tokens and visually inspect desktop and mobile clipping",
+      },
+    ];
+    write(id, "cost-approval.json", { approvedCost: true });
+    write(id, "diagnosis.json", {
+      issue: read<Issue>(id, "intake.json"),
+      mode: "openai",
+      actionable: true,
+      reason: "Rounded surfaces",
+      acceptanceCriteria: stylingCriteria.map((c) => c.description),
+      risks: [],
+      questions: [],
+    });
+    create.mockResolvedValueOnce(
+      reply({
+        summary: "Use shared radius tokens",
+        files: [
+          { path: "src/index.css", reason: "Radius tokens and selectors" },
+          {
+            path: "src/__tests__/radii.test.ts",
+            reason: "CSS contract regression",
+          },
+        ],
+        risks: [],
+        verificationNotes: [],
+      }),
+    );
+    const steps = [
+      "At 1280px desktop and 375px mobile, open the cart and inspect product images, drawer edge backgrounds and rounded clipping; images must stay inside their surfaces.",
+      "At both viewports, tab through search, filters, size controls, cart close and quantity buttons; every focus outline must remain visible without clipping.",
+    ];
+    create.mockResolvedValueOnce(
+      reply({
+        code: `import {it,expect} from 'vitest'; import {readFileSync} from 'node:fs'; const css=readFileSync(new URL('../index.css',import.meta.url),'utf8'); it('AC-1 radius tokens',()=>{expect(css).toMatch(/--radius-sm:/);expect(css).toMatch(/--radius-lg:/);});`,
+        manualVerification: [{ criterionId: "AC-1", steps }],
+      }),
+    );
+    create.mockResolvedValueOnce(approvedAcceptance(stylingCriteria));
+    const draft = await fitter(id, undefined, true);
+    expect(
+      read<{ manualVerification: unknown }>(id, "acceptance-tests.json")
+        .manualVerification,
+    ).toEqual([{ criterionId: "AC-1", steps }]);
+    expect(draft.verificationNotes).toEqual(
+      steps.map((step) => `Pending manual verification (AC-1): ${step}`),
+    );
+    const generator = create.mock.calls[1][0];
+    const review = create.mock.calls[2][0];
+    expect(generator.instructions).toContain(
+      "getByRole('button', {name: 'Graphic Tees'})",
+    );
+    expect(generator.instructions).toContain(
+      "close buttons, quantity buttons, size controls",
+    );
+    expect(generator.text.format.schema.required).toContain(
+      "manualVerification",
+    );
+    expect(review.instructions).toContain(
+      "not results of browser checks that cannot have run yet",
+    );
+    expect(
+      JSON.parse(review.input).candidateAcceptanceTests.manualVerification,
+    ).toEqual([{ criterionId: "AC-1", steps }]);
+    expect(draft.acceptanceHash).toBe(qualityHash(id, "acceptance-tests.json"));
+  });
+
+  it("rejects malformed manual checklists without bypassing executable acceptance", () => {
+    const code = `it('AC-1 subtotal',()=>{expect(subtotal([])).toBe(0);});`;
+    for (const manualVerification of [
+      [{ criterionId: "AC-99", steps: ["Inspect the cart"] }],
+      [{ criterionId: "AC-1", steps: [] }],
+      [{ criterionId: "AC-1", steps: [" "] }],
+      [
+        { criterionId: "AC-1", steps: ["Inspect"] },
+        { criterionId: "AC-1", steps: ["Inspect again"] },
+      ],
+    ]) {
+      expect(() =>
+        validateAcceptance({ code, manualVerification }, criteria),
+      ).toThrow("Manual verification");
+    }
+    expect(() =>
+      validateAcceptance(
+        {
+          code: "",
+          manualVerification: [{ criterionId: "AC-1", steps: ["Inspect"] }],
+        },
+        criteria,
+      ),
+    ).toThrow("real assertions");
+  });
+
   it("rejects the live duplicate-status test and permits properly isolated renders", () => {
     const faulty = `it('AC-1 state changes',()=>{render(<ShippingProgress subtotal={0}/>);expect(screen.getByRole('status')).toBeTruthy();render(<ShippingProgress subtotal={250}/>);expect(screen.getByRole('status')).toBeTruthy();});`;
     expect(() => validateAcceptance({ code: faulty }, criteria)).toThrow(

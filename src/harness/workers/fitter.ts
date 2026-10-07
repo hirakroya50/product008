@@ -150,7 +150,15 @@ it("AC-3 responds to real cart quantity changes", () => {
     rationale: Object.fromEntries(plan.files.map((f) => [f.path, f.reason])),
     acceptanceCriteria: criteria,
     risks: plan.risks,
-    verificationNotes: plan.verificationNotes,
+    verificationNotes: [
+      ...plan.verificationNotes,
+      ...(acceptance.manualVerification ?? []).flatMap((check) =>
+        check.steps.map(
+          (step) =>
+            `Pending manual verification (${check.criterionId}): ${step}`,
+        ),
+      ),
+    ],
     assumptions: diagnosis.assumptions ?? [],
     paths,
     hashes: Object.fromEntries(paths.map((p) => [p, hash(safePath(p))])),

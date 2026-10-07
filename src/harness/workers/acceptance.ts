@@ -12,6 +12,10 @@ interface AcceptanceReview {
 }
 const queryGuidance =
   "Check query uniqueness against the DOM at EACH asserted state, including after quantity updates and checkout. One render can still contain duplicate text or roles. For repeated prices, scope with within() to the intended item or subtotal container, or use getAllByText and assert the expected count and values. For multiple status elements, select the intended message by its unique text and assert its role, or scope within a container that contains only that status. Scoping to a dialog alone is insufficient if both statuses are inside the dialog. Do not invent accessible names absent from source. Existing regression tests provide examples of safe queries; preserve their behavior. Never replace an ambiguous query with an arbitrary [0] or weaken its assertion.";
+const coverageGuidance =
+  "For styling criteria listing multiple surfaces, enumerate every named surface from source and assert token usage for each relevant selector; checking only one cart button does not cover close buttons, quantity buttons, size controls, inputs, cards or dialogs. For category text such as Graphic Tees appearing in both filters and product tags, use getByRole('button', {name: 'Graphic Tees'}) for the filter. For a tag, scope within a specific product card, or assert all matching tags using their actual selector and expected values. Never use screen.getByText('Graphic Tees') when rendering the full catalog.";
+const manualGuidance =
+  "This repository uses Vitest/jsdom, which cannot verify rendered layout, clipping, focus-ring visibility or real viewport breakpoints. For a criterion mixing automated and visual/manual verification, test its automatable requirements and include concrete pending browser steps in manualVerification with the same criterionId. Include viewports, surfaces, actions and expected visual results; these steps will be retained in the draft PR for human review. Do not claim these checks ran. Every criterion still needs meaningful executable assertions for its automatable portion; a checklist does not replace those assertions. During pre-implementation test review, assess the assertions and completeness of the pending checklist, not results of browser checks that cannot have run yet. Reject missing checklists or checklists used to avoid automatable requirements. Do not demand browser tooling or dependencies absent from the repository.";
 
 export async function prepareAcceptance(
   id: string,
@@ -28,6 +32,10 @@ export async function prepareAcceptance(
       "acceptance_tests",
       "Act as an independent test engineer before product implementation. Write executable Vitest / React Testing Library tests based on the issue and existing public APIs. Each criterion must have a top-level it/test with a literal name starting with its AC-N ID followed by a space. Imports are relative to src/__tests__/issue-acceptance.test.tsx. Use real assertions, real implementation, valid repository fixtures, observable behavior, meaningful boundaries and regressions. Exercise stock/quantity/subtotal APIs when those behaviors are required; merely checking static product fixture fields is insufficient. Use ONE render per test and rerender for changing props; explicitly unmount before mounting a different root. afterEach cleanup only runs between tests, so several render() calls in one test cause duplicate roles/text. Do not mock/spy on application code, skip checks, assert placeholders, duplicate implementation inside tests or invent APIs/fixtures. Address validation findings by fixing the test's harness or strengthening coverage, never by weakening expected business behavior. Preserve all acceptance criteria. " +
         queryGuidance +
+        " " +
+        coverageGuidance +
+        " " +
+        manualGuidance +
         (previousTests
           ? " This is a REPAIR of previousTests, not a fresh test design. Correct every validationFinding in the existing candidate, inspect all similar queries for the same defect, and retain unaffected tests and assertions. Return the complete corrected code."
           : ""),
@@ -39,7 +47,16 @@ export async function prepareAcceptance(
         previousTests,
         validationFindings: findings,
       },
-      objectSchema({ code: stringSchema }),
+      objectSchema({
+        code: stringSchema,
+        manualVerification: {
+          type: "array",
+          items: objectSchema({
+            criterionId: stringSchema,
+            steps: stringsSchema,
+          }),
+        },
+      }),
     );
     previousTests = tests;
     try {
@@ -54,25 +71,18 @@ export async function prepareAcceptance(
       });
       continue;
     }
-    const plannedPaths = new Set(
-      ((plan as { files?: { path: string }[] }).files ?? []).map(
-        (file) => file.path,
-      ),
-    );
-    const unchangedReferenceSources = Object.fromEntries(
-      Object.entries(repository.sources).filter(
-        ([path]) => path.startsWith("src/") && !plannedPaths.has(path),
-      ),
-    );
     const review = await ask<AcceptanceReview>(
       id,
       "acceptance_review",
-      "Independently review ONLY the CANDIDATE ACCEPTANCE TEST CODE before product development. All application source and existing regression tests supplied below are the UNCHANGED PRE-ISSUE BASELINE. The feature is deliberately not implemented yet. Compare every criterion against issue, source, public interfaces and fixtures. Check React Testing Library DOM isolation, duplicate-role queries, proper rerender/unmount, valid fixtures and imports, boundary expectations and regression coverage. Static fixture checks do not prove cart stock/quantity enforcement; require behavioral API/UI assertions. Do not demand implementing new business rules. Coverage means the candidate contains valid behavioral assertions for the requested future behavior. It does NOT mean that the current product already passes them. For example, expect(FREE_SHIPPING_THRESHOLD).toBe(250) is valid covered threshold testing even while the baseline constant is 75. Findings such as the constant remains 75, App copy still says $75, or existing regression tests assert $75 are expected baseline failures, NEVER candidate-test defects. Do not report those findings or mark criteria missing because of them. Judge criterion coverage solely from candidate assertions; use baseline source only to check public APIs, fixture validity and established behavior. Reject test-harness defects and omitted or trivial coverage. findings contains only blocking defects needing correction. Each criterion must appear exactly once with status covered or missing and concrete assertion evidence. Do not claim you ran tests.",
+      "Independently review ONLY the CANDIDATE ACCEPTANCE TEST CODE before product development. All application source and existing regression tests supplied below are the UNCHANGED PRE-ISSUE BASELINE. The feature is deliberately not implemented yet. Compare every criterion against issue, source, public interfaces and fixtures. Check React Testing Library DOM isolation, duplicate-role queries, proper rerender/unmount, valid fixtures and imports, boundary expectations and regression coverage. Static fixture checks do not prove cart stock/quantity enforcement; require behavioral API/UI assertions. Do not demand implementing new business rules. Coverage means the candidate contains valid behavioral assertions for the requested future behavior. It does NOT mean that the current product already passes them. For example, expect(FREE_SHIPPING_THRESHOLD).toBe(250) is valid covered threshold testing even while the baseline constant is 75. Findings such as the constant remains 75, App copy still says $75, or existing regression tests assert $75 are expected baseline failures, NEVER candidate-test defects. Do not report those findings or mark criteria missing because of them. Judge automated coverage solely from candidate assertions; use baseline source only to check public APIs, fixture validity and established behavior. Reject test-harness defects and omitted or trivial coverage. findings contains only blocking defects needing correction. Each criterion must appear exactly once with status covered or missing and concrete assertion evidence. Do not claim you ran tests. " +
+        manualGuidance,
       {
         diagnosis,
         criteria,
         plan,
-        unchangedReferenceSources,
+        // Planned files are still baseline source here; reviewers need them to
+        // check existing DOM structure and APIs before implementation starts.
+        baselineSources: repository.sources,
         candidateAcceptanceTests: tests,
       },
       objectSchema({
