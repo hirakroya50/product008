@@ -755,6 +755,82 @@ describe("acceptance and review gates", () => {
     ).toBe("approved");
   });
 
+  it("repairs issue 19 empty-cart shipping without losing exact-threshold coverage", async () => {
+    aiMode();
+    const id = fixture();
+    write(id, "cost-approval.json", { approvedCost: true });
+    const shippingCriteria = [
+      {
+        id: "AC-5",
+        description: "Preserve shipping boundaries and cart removal behavior",
+      },
+    ];
+    const faulty = `import {it,expect} from 'vitest'; import {render,screen} from '@testing-library/react'; import {ShippingProgress} from '../components/ShippingProgress'; it('AC-5 shipping boundaries',()=>{const view=render(<ShippingProgress subtotal={75}/>);expect(screen.getByRole('status')).toHaveTextContent('You unlocked free shipping!');view.rerender(<ShippingProgress subtotal={0}/>);expect(screen.getByRole('status')).toHaveTextContent('You unlocked free shipping!');});`;
+    const corrected = faulty.replace(
+      "view.rerender(<ShippingProgress subtotal={0}/>);expect(screen.getByRole('status')).toHaveTextContent('You unlocked free shipping!')",
+      `view.rerender(<ShippingProgress subtotal={0}/>);expect(screen.getByRole('status')).toHaveTextContent("You're $75.00 away from free shipping.")`,
+    );
+    const finding =
+      "AC-5 contains an incorrect shipping boundary assertion: at $0.00 expect $75.00 away from free shipping. Retain the existing exact-threshold unlocked assertion.";
+    create.mockResolvedValueOnce(reply({ code: faulty }));
+    create.mockResolvedValueOnce(
+      reply({
+        valid: false,
+        findings: [finding],
+        criteria: [
+          {
+            id: "AC-5",
+            status: "missing",
+            evidence: "Incorrect zero-subtotal message",
+          },
+        ],
+      }),
+    );
+    create.mockResolvedValueOnce(reply({ code: corrected }));
+    create.mockResolvedValueOnce(approvedAcceptance(shippingCriteria));
+    const tests = await prepareAcceptance(
+      id,
+      {
+        issue: read<Issue>(id, "intake.json"),
+        actionable: true,
+        reason: "Preserve cart",
+        severity: "P3",
+        subsystems: ["cart"],
+        reproducible: true,
+      },
+      shippingCriteria,
+      {},
+      repository.repositoryContext(),
+    );
+    expect(tests.code).toContain("You're $75.00 away from free shipping.");
+    expect(tests.code.match(/You unlocked free shipping!/g)).toHaveLength(1);
+    expect(tests.code).toContain("subtotal={75}");
+    const repair = create.mock.calls[2][0];
+    expect(JSON.parse(repair.input).validationFindings).toContain(finding);
+    expect(
+      JSON.parse(repair.input).previousTests.code.match(
+        /You unlocked free shipping!/g,
+      ),
+    ).toHaveLength(2);
+    for (const [request] of create.mock.calls) {
+      expect(request.instructions).toContain(
+        "after removing the FINAL cart item",
+      );
+      expect(request.instructions).toContain(
+        "retain the valid exact-threshold unlocked assertion",
+      );
+      expect(request.instructions).toContain(
+        "use that requested value instead of hardcoding $75",
+      );
+    }
+    expect(
+      read<{ status: string }>(id, "acceptance-generation-0.json").status,
+    ).toBe("invalid");
+    expect(
+      read<{ status: string }>(id, "acceptance-generation-1.json").status,
+    ).toBe("approved");
+  });
+
   it("repairs issue 18 cart stock and downstream totals before freezing acceptance", async () => {
     aiMode();
     const id = fixture();

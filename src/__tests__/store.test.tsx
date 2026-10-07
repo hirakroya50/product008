@@ -142,3 +142,46 @@ describe("ThreadCraft", () => {
     expect(total.getByText("$384.00")).toBeInTheDocument();
   });
 });
+
+it("recomputes shipping when the final cart item is removed", () => {
+  render(<App />);
+  const card = screen
+    .getByRole("heading", { name: "Out of Office" })
+    .closest("article")!;
+  fireEvent.click(within(card).getByRole("button", { name: "Add to bag" }));
+  const dialog = screen.getByRole("dialog", { name: "Shopping bag" });
+  const shipping = within(
+    within(dialog).getByRole("region", { name: "Free shipping progress" }),
+  );
+  const total = within(dialog.querySelector<HTMLElement>(".subtotal")!);
+  const increase = within(dialog).getByRole("button", {
+    name: "Increase Out of Office",
+  });
+  fireEvent.click(increase);
+  fireEvent.click(increase);
+  expect(total.getByText("$96.00")).toBeInTheDocument();
+  expect(shipping.getByRole("status")).toHaveTextContent(
+    "You unlocked free shipping!",
+  );
+  fireEvent.click(within(dialog).getByRole("button", { name: "Checkout" }));
+  expect(within(dialog).getAllByRole("status")).toHaveLength(2);
+  const decrease = within(dialog).getByRole("button", {
+    name: "Decrease Out of Office",
+  });
+  fireEvent.click(decrease);
+  expect(total.getByText("$64.00")).toBeInTheDocument();
+  expect(shipping.getByRole("status")).toHaveTextContent(
+    "You're $11.00 away from free shipping.",
+  );
+  fireEvent.click(decrease);
+  fireEvent.click(decrease);
+  expect(dialog.querySelectorAll(".cart-item")).toHaveLength(0);
+  expect(total.getByText("$0.00")).toBeInTheDocument();
+  expect(shipping.getByRole("status")).toHaveTextContent(
+    "You're $75.00 away from free shipping.",
+  );
+  expect(shipping.getByRole("progressbar")).toHaveAttribute("value", "0");
+  expect(
+    shipping.queryByText("You unlocked free shipping!"),
+  ).not.toBeInTheDocument();
+});
