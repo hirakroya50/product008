@@ -1,17 +1,19 @@
 import { Search, ShoppingBag, ArrowUpRight } from "lucide-react";
+
 interface Props {
   count: number;
   search: string;
   onSearch: (value: string) => void;
   onCart: () => void;
 }
+
 export function Navbar({ count, search, onSearch, onCart }: Props) {
   return (
     <>
       <div className="announcement">
         Good threads. Better days.{" "}
         <span>
-          Free shipping on orders $75+ <ArrowUpRight size={12} />
+          Free shipping on orders $250+ <ArrowUpRight size={12} />
         </span>
       </div>
       <nav className="navbar">
