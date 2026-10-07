@@ -79,4 +79,66 @@ describe("ThreadCraft", () => {
       "status",
     );
   });
+  it("shares stock across drawer variants and distinguishes line totals from subtotal", () => {
+    render(<App />);
+    const card = screen
+      .getByRole("heading", { name: "Out of Office" })
+      .closest("article")!;
+    const product = within(card);
+    fireEvent.click(
+      product.getByRole("button", { name: "Out of Office size M" }),
+    );
+    fireEvent.click(product.getByRole("button", { name: "Add to bag" }));
+    fireEvent.click(screen.getByRole("button", { name: "Close cart" }));
+    fireEvent.click(
+      product.getByRole("button", { name: "Out of Office size L" }),
+    );
+    fireEvent.click(product.getByRole("button", { name: "Add to bag" }));
+
+    const dialog = screen.getByRole("dialog", { name: "Shopping bag" });
+    const lines = dialog.querySelectorAll<HTMLElement>(".cart-item");
+    expect(lines).toHaveLength(2);
+    expect(within(lines[0]).getByText(/Size M/)).toBeInTheDocument();
+    expect(within(lines[1]).getByText(/Size L/)).toBeInTheDocument();
+    const first = within(lines[0]);
+    const second = within(lines[1]);
+    const total = within(dialog.querySelector<HTMLElement>(".subtotal")!);
+    const increase = first.getByRole("button", {
+      name: "Increase Out of Office",
+    });
+    for (let i = 0; i < 10; i++) fireEvent.click(increase);
+    expect(first.getByText("11")).toBeInTheDocument();
+    expect(second.getByText("1")).toBeInTheDocument();
+    expect(first.getByText("$352.00")).toBeInTheDocument();
+    expect(second.getByText("$32.00")).toBeInTheDocument();
+    expect(total.getByText("$384.00")).toBeInTheDocument();
+
+    fireEvent.click(increase);
+    fireEvent.click(
+      second.getByRole("button", { name: "Increase Out of Office" }),
+    );
+    expect(first.getByText("11")).toBeInTheDocument();
+    expect(second.getByText("1")).toBeInTheDocument();
+    expect(total.getByText("$384.00")).toBeInTheDocument();
+
+    fireEvent.click(
+      first.getByRole("button", { name: "Decrease Out of Office" }),
+    );
+    expect(first.getByText("10")).toBeInTheDocument();
+    expect(first.getByText("$320.00")).toBeInTheDocument();
+    expect(second.getByText("$32.00")).toBeInTheDocument();
+    expect(total.getByText("$352.00")).toBeInTheDocument();
+    expect(within(dialog).getAllByText("$352.00")).toHaveLength(1);
+
+    fireEvent.click(
+      second.getByRole("button", { name: "Decrease Out of Office" }),
+    );
+    expect(dialog.querySelectorAll(".cart-item")).toHaveLength(1);
+    expect(total.getByText("$320.00")).toBeInTheDocument();
+    fireEvent.click(increase);
+    fireEvent.click(increase);
+    fireEvent.click(increase);
+    expect(first.getByText("12")).toBeInTheDocument();
+    expect(total.getByText("$384.00")).toBeInTheDocument();
+  });
 });

@@ -755,6 +755,74 @@ describe("acceptance and review gates", () => {
     ).toBe("approved");
   });
 
+  it("repairs issue 18 cart stock and downstream totals before freezing acceptance", async () => {
+    aiMode();
+    const id = fixture();
+    write(id, "cost-approval.json", { approvedCost: true });
+    const cartCriteria = [
+      { id: "AC-5", description: "Preserve cart and stock behavior" },
+    ];
+    const faulty = `it('AC-5 cart behavior',()=>{expect(items[0].quantity).toBe(12);expect(within(dialog).getAllByText('$352.00')).toHaveLength(2);});`;
+    const corrected = `it('AC-5 cart behavior',()=>{expect(items[0].quantity).toBe(11);expect(items[1].quantity).toBe(1);expect(subtotal(items)).toBe(384);items=changeQuantity(items,cartKey(items[0]),-1);expect(items[0].quantity).toBe(10);expect(items[0].quantity*items[0].product.price).toBe(320);expect(subtotal(items)).toBe(352);});`;
+    const findings = [
+      "AC-5: stock 12 is shared across variants; with the second at 1, the first is capped at 11.",
+      "AC-5: recompute downstream totals and scope item prices separately from the subtotal.",
+    ];
+    create.mockResolvedValueOnce(reply({ code: faulty }));
+    create.mockResolvedValueOnce(
+      reply({
+        valid: false,
+        findings,
+        criteria: [
+          {
+            id: "AC-5",
+            status: "missing",
+            evidence: "Invalid cart state and subtotal",
+          },
+        ],
+      }),
+    );
+    create.mockResolvedValueOnce(reply({ code: corrected }));
+    create.mockResolvedValueOnce(approvedAcceptance(cartCriteria));
+    const tests = await prepareAcceptance(
+      id,
+      {
+        issue: read<Issue>(id, "intake.json"),
+        actionable: true,
+        reason: "Rounded styling with unchanged cart behavior",
+        severity: "P2",
+        subsystems: ["cart"],
+        reproducible: true,
+      },
+      cartCriteria,
+      {},
+      repository.repositoryContext(),
+    );
+
+    expect(tests.code).toContain("toBe(384)");
+    expect(tests.code).toContain("toBe(352)");
+    const repair = create.mock.calls[2][0];
+    expect(JSON.parse(repair.input).validationFindings).toEqual(findings);
+    expect(JSON.parse(repair.input).previousTests.code).toContain("toBe(12)");
+    expect(repair.instructions).toContain(
+      "recompute EVERY downstream line total",
+    );
+    for (const [request] of create.mock.calls) {
+      expect(request.instructions).toContain(
+        "Stock is shared across ALL size/color variants",
+      );
+      expect(request.instructions).toContain(
+        "line totals $320 and $32, subtotal $352",
+      );
+    }
+    expect(
+      read<{ status: string }>(id, "acceptance-generation-0.json").status,
+    ).toBe("invalid");
+    expect(
+      read<{ status: string }>(id, "acceptance-generation-1.json").status,
+    ).toBe("approved");
+  });
+
   it("keeps the acceptance gate closed and explains exhausted generation attempts", async () => {
     aiMode();
     const id = fixture();

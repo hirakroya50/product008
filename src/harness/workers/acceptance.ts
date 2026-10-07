@@ -14,6 +14,8 @@ const queryGuidance =
   "Check query uniqueness against the DOM at EACH asserted state, including after quantity updates and checkout. One render can still contain duplicate text or roles. For repeated prices, scope with within() to the intended item or subtotal container, or use getAllByText and assert the expected count and values. For multiple status elements, select the intended message by its unique text and assert its role, or scope within a container that contains only that status. Scoping to a dialog alone is insufficient if both statuses are inside the dialog. Do not invent accessible names absent from source. Existing regression tests provide examples of safe queries; preserve their behavior. Never replace an ambiguous query with an arbitrary [0] or weaken its assertion.";
 const coverageGuidance =
   "For styling criteria listing multiple surfaces, enumerate every named surface from source and assert token usage for each relevant selector; checking only one cart button does not cover close buttons, quantity buttons, size controls, inputs, cards or dialogs. For category text such as Graphic Tees appearing in both filters and product tags, use getByRole('button', {name: 'Graphic Tees'}) for the filter. For a tag, scope within a specific product card, or assert all matching tags using their actual selector and expected values. Never use screen.getByText('Graphic Tees') when rendering the full catalog.";
+const cartGuidance =
+  "For cart regressions, trace every add/increase/decrease/remove action against the actual cart APIs before choosing assertions. Stock is shared across ALL size/color variants of a product, not a separate allowance for each line. Line total = that line's quantity * price; subtotal = the sum of ALL remaining line totals. Recompute quantities, totals and DOM query counts after every action, including blocked increases and removals. For the existing Out of Office fixture ($32, stock 12), two variants starting at quantity 1 each allow the first to reach only 11 while the second stays at 1: line totals $352 and $32, subtotal $384. Another increase is blocked. Decreasing the first then gives quantities 10 and 1: line totals $320 and $32, subtotal $352. Scope price assertions within the specific .cart-item and .subtotal separately; a dialog can contain both. Prefer separate focused stock and subtotal tests over a long UI sequence if it makes the state clearer. For criteria preserving existing behavior, use the existing regression tests as the behavioral reference; do not invent new business rules.";
 const manualGuidance =
   "This repository uses Vitest/jsdom, which cannot verify rendered layout, clipping, focus-ring visibility or real viewport breakpoints. For a criterion mixing automated and visual/manual verification, test its automatable requirements and include concrete pending browser steps in manualVerification with the same criterionId. Include viewports, surfaces, actions and expected visual results; these steps will be retained in the draft PR for human review. Do not claim these checks ran. Every criterion still needs meaningful executable assertions for its automatable portion; a checklist does not replace those assertions. During pre-implementation test review, assess the assertions and completeness of the pending checklist, not results of browser checks that cannot have run yet. Reject missing checklists or checklists used to avoid automatable requirements. Do not demand browser tooling or dependencies absent from the repository.";
 
@@ -35,9 +37,11 @@ export async function prepareAcceptance(
         " " +
         coverageGuidance +
         " " +
+        cartGuidance +
+        " " +
         manualGuidance +
         (previousTests
-          ? " This is a REPAIR of previousTests, not a fresh test design. Correct every validationFinding in the existing candidate, inspect all similar queries for the same defect, and retain unaffected tests and assertions. Return the complete corrected code."
+          ? " This is a REPAIR of previousTests, not a fresh test design. Correct every validationFinding in the existing candidate, inspect all similar queries for the same defect, and retain unaffected tests and assertions. When correcting a cart action or quantity expectation, recompute EVERY downstream line total, subtotal and query count from the corrected sequence; do not mechanically change just the reported assertion. Return the complete corrected code."
           : ""),
       {
         diagnosis,
@@ -75,6 +79,10 @@ export async function prepareAcceptance(
       id,
       "acceptance_review",
       "Independently review ONLY the CANDIDATE ACCEPTANCE TEST CODE before product development. All application source and existing regression tests supplied below are the UNCHANGED PRE-ISSUE BASELINE. The feature is deliberately not implemented yet. Compare every criterion against issue, source, public interfaces and fixtures. Check React Testing Library DOM isolation, duplicate-role queries, proper rerender/unmount, valid fixtures and imports, boundary expectations and regression coverage. Static fixture checks do not prove cart stock/quantity enforcement; require behavioral API/UI assertions. Do not demand implementing new business rules. Coverage means the candidate contains valid behavioral assertions for the requested future behavior. It does NOT mean that the current product already passes them. For example, expect(FREE_SHIPPING_THRESHOLD).toBe(250) is valid covered threshold testing even while the baseline constant is 75. Findings such as the constant remains 75, App copy still says $75, or existing regression tests assert $75 are expected baseline failures, NEVER candidate-test defects. Do not report those findings or mark criteria missing because of them. Judge automated coverage solely from candidate assertions; use baseline source only to check public APIs, fixture validity and established behavior. Reject test-harness defects and omitted or trivial coverage. findings contains only blocking defects needing correction. Each criterion must appear exactly once with status covered or missing and concrete assertion evidence. Do not claim you ran tests. " +
+        queryGuidance +
+        " " +
+        cartGuidance +
+        " " +
         manualGuidance,
       {
         diagnosis,
