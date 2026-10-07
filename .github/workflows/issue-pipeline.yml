@@ -18,9 +18,10 @@ concurrency:
 jobs:
   pipeline:
     # Only repository owners/collaborators/members can initiate this demo automatically.
-    if: >-
-      github.event_name == 'workflow_dispatch' ||
-      contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.issue.author_association)
+    # if: >-
+    #   github.event_name == 'workflow_dispatch' ||
+    #   contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.issue.author_association)
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'issues'
     runs-on: macos-15
     timeout-minutes: 40
     env:
