@@ -85,7 +85,7 @@ export default function App() {
             <Leaf size={18} /> Better cotton, better comfort
           </span>
           <span>
-            <Package size={18} /> Free shipping over $75
+            <Package size={18} /> Free shipping over $2500
           </span>
           <span>
             <Heart size={18} /> Made to be your favorite
