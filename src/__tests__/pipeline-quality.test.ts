@@ -23,6 +23,14 @@ import { validatePaths } from "../harness/repository";
 import { reviewPassed, reviewer } from "../harness/workers/reviewer";
 import { triager } from "../harness/workers/triager";
 import { prepareAcceptance } from "../harness/workers/acceptance";
+import { acceptancePreflight } from "../harness/acceptance-preflight";
+vi.mock("../harness/acceptance-preflight", () => ({
+  acceptancePreflight: vi.fn(() => ({
+    blockers: [],
+    checks: [],
+    failures: [],
+  })),
+}));
 import { fitter } from "../harness/workers/fitter";
 import { developer } from "../harness/workers/developer";
 import * as developerWorker from "../harness/workers/developer";
@@ -158,6 +166,12 @@ afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllEnvs();
   create.mockReset();
+  vi.mocked(acceptancePreflight).mockReset();
+  vi.mocked(acceptancePreflight).mockReturnValue({
+    blockers: [],
+    checks: [],
+    failures: [],
+  });
   for (const id of workIds.splice(0))
     fs.rmSync(workDir(id), { recursive: true, force: true });
 });
@@ -755,6 +769,97 @@ describe("acceptance and review gates", () => {
     ).toBe("approved");
   });
 
+  it("repairs executable type errors before freezing acceptance", async () => {
+    aiMode();
+    const id = fixture();
+    write(id, "cost-approval.json", { approvedCost: true });
+    const broken = `it('AC-1 subtotal',()=>{const total: string = 0;expect(total).toBe(0);});`;
+    const repaired = `it('AC-1 subtotal',()=>{expect(subtotal([])).toBe(0);});`;
+    vi.mocked(acceptancePreflight).mockReturnValueOnce({
+      blockers: ["TS2322: number is not assignable to string"],
+      checks: [],
+      failures: [],
+    });
+    create.mockResolvedValueOnce(reply({ code: broken }));
+    create.mockResolvedValueOnce(reply({ code: repaired }));
+    create.mockResolvedValueOnce(approvedAcceptance(criteria));
+    await prepareAcceptance(
+      id,
+      {
+        issue: read<Issue>(id, "intake.json"),
+        actionable: true,
+        reason: "Subtotal",
+        severity: "P2",
+        subsystems: ["cart"],
+        reproducible: true,
+      },
+      criteria,
+      {},
+      repository.repositoryContext(),
+    );
+    expect(
+      create.mock.calls.map(([request]) => request.text.format.name),
+    ).toEqual(["acceptance_tests", "acceptance_tests", "acceptance_review"]);
+    expect(
+      JSON.parse(create.mock.calls[1][0].input).validationFindings,
+    ).toEqual(["TS2322: number is not assignable to string"]);
+    expect(acceptancePreflight).toHaveBeenCalledTimes(2);
+  });
+
+  it("cannot freeze unclassified executable failures even when the reviewer says valid", async () => {
+    aiMode();
+    const id = fixture();
+    write(id, "cost-approval.json", { approvedCost: true });
+    const failure = {
+      id: "requested-threshold-probe-1",
+      scenario: "requested-threshold-probe",
+      file: "src/__tests__/issue-acceptance.test.tsx",
+      name: "AC-1 cart progress",
+      status: "failed",
+      message: 'Expected value="0", received value="21.40468227424749"',
+    };
+    vi.mocked(acceptancePreflight).mockReturnValueOnce({
+      blockers: [],
+      checks: [],
+      failures: [failure],
+    });
+    create.mockResolvedValueOnce(
+      reply({
+        code: `it('AC-1 cart progress',()=>{expect(shippingProgress(64)).toBe(0);});`,
+      }),
+    );
+    create.mockResolvedValueOnce(approvedAcceptance(criteria));
+    create.mockResolvedValueOnce(
+      reply({
+        code: `it('AC-1 cart progress',()=>{expect(shippingProgress(64)).toBeCloseTo(64/299*100);});`,
+      }),
+    );
+    create.mockResolvedValueOnce(approvedAcceptance(criteria));
+    await prepareAcceptance(
+      id,
+      {
+        issue: read<Issue>(id, "intake.json"),
+        actionable: true,
+        reason: "Subtotal",
+        severity: "P2",
+        subsystems: ["cart"],
+        reproducible: true,
+      },
+      criteria,
+      {},
+      repository.repositoryContext(),
+    );
+    expect(
+      JSON.parse(create.mock.calls[1][0].input).preflight.failures,
+    ).toEqual([failure]);
+    expect(
+      JSON.parse(create.mock.calls[2][0].input).validationFindings[0],
+    ).toContain("requires exactly one evidence-based classification");
+    expect(
+      read<{ status: string }>(id, "acceptance-generation-0.json").status,
+    ).toBe("invalid");
+  });
+
   it("repairs issue 19 empty-cart shipping without losing exact-threshold coverage", async () => {
     aiMode();
     const id = fixture();
@@ -878,7 +983,10 @@ describe("acceptance and review gates", () => {
     expect(tests.code).toContain("toBe(384)");
     expect(tests.code).toContain("toBe(352)");
     const repair = create.mock.calls[2][0];
-    expect(JSON.parse(repair.input).validationFindings).toEqual(findings);
+    expect(JSON.parse(repair.input).validationFindings).toEqual([
+      ...findings,
+      "Every acceptance criterion requires meaningful assertion coverage",
+    ]);
     expect(JSON.parse(repair.input).previousTests.code).toContain("toBe(12)");
     expect(repair.instructions).toContain(
       "recompute EVERY downstream line total",
@@ -1205,6 +1313,53 @@ describe("API execution boundaries", () => {
 });
 
 describe("repair loop infrastructure failures", () => {
+  it.each(["frozen-types", "protected-harness"])(
+    "does not spend a repair cycle on %s",
+    async (kind) => {
+      const id = fixture();
+      write(id, "draft.json", { maxCycles: 3 });
+      write(id, "test-record.json", {
+        status: "failed",
+        cycle: 0,
+        fingerprint: "candidate",
+        checks: [
+          {
+            name: kind === "frozen-types" ? "typecheck" : "test",
+            status: "failed",
+            exitCode: 1,
+            log:
+              kind === "frozen-types"
+                ? "src/__tests__/issue-acceptance.test.tsx(42,3): error TS2322: Type unknown[] is not assignable to CSSRule[]"
+                : "Regression failure",
+            failures:
+              kind === "protected-harness"
+                ? [
+                    {
+                      file: "/tmp/runner/src/__tests__/pipeline-quality.test.ts",
+                      name: "repairs issue 18",
+                      status: "failed",
+                      message: "expected 2 findings, received 3",
+                    },
+                  ]
+                : [],
+          },
+        ],
+      });
+      const repair = vi.spyOn(developerWorker, "developer");
+      await expect(fixer(id)).rejects.toThrow(
+        "Unrepairable test infrastructure",
+      );
+      expect(repair).not.toHaveBeenCalled();
+      expect(
+        fs.readFileSync(path.join(workDir(id), "investigation.md"), "utf8"),
+      ).toContain(
+        kind === "frozen-types"
+          ? "frozen acceptance contract has TypeScript errors"
+          : "Protected harness tests failed",
+      );
+    },
+  );
+
   it.each(["provider", "runner"])(
     "stops immediately when a %s failure appears after a repair",
     async (kind) => {

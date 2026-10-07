@@ -1,4 +1,8 @@
 import { format } from "prettier";
+import {
+  acceptancePreflight,
+  type AcceptancePreflight,
+} from "../acceptance-preflight";
 import fs from "node:fs";
 import path from "node:path";
 import { ask, objectSchema, stringSchema, stringsSchema } from "../ai";
@@ -9,6 +13,11 @@ interface AcceptanceReview {
   valid: boolean;
   findings: string[];
   criteria: { id: string; status: string; evidence: string }[];
+  runtimeFindings: {
+    id: string;
+    classification: "expected-feature-failure" | "test-defect";
+    evidence: string;
+  }[];
 }
 const queryGuidance =
   "Check query uniqueness against the DOM at EACH asserted state, including after quantity updates and checkout. One render can still contain duplicate text or roles. For repeated prices, scope with within() to the intended item or subtotal container, or use getAllByText and assert the expected count and values. For multiple status elements, select the intended message by its unique text and assert its role, or scope within a container that contains only that status. Scoping to a dialog alone is insufficient if both statuses are inside the dialog. Do not invent accessible names absent from source. In this baseline, <p role='status'> text does NOT give the element an accessible name: getByRole('status', {name: message}) fails for both shipping and checkout. Use within(getByRole('region', {name: 'Free shipping progress'})).getByRole('status') for shipping, or getByText(message) plus toHaveAttribute('role', 'status') for checkout. Existing regression tests provide examples of safe queries; preserve their behavior. Never replace an ambiguous query with an arbitrary [0] or weaken its assertion.";
@@ -17,9 +26,9 @@ const coverageGuidance =
 const cartGuidance =
   "For cart regressions, trace every add/increase/decrease/remove action against the actual cart APIs before choosing assertions. Stock is shared across ALL size/color variants of a product, not a separate allowance for each line. Line total = that line's quantity * price; subtotal = the sum of ALL remaining line totals. Recompute quantities, totals and DOM query counts after every action, including blocked increases and removals. For the existing Out of Office fixture ($32, stock 12), two variants starting at quantity 1 each allow the first to reach only 11 while the second stays at 1: line totals $352 and $32, subtotal $384. Another increase is blocked. Decreasing the first then gives quantities 10 and 1: line totals $320 and $32, subtotal $352. Scope price assertions within the specific .cart-item and .subtotal separately; a dialog can contain both. Prefer separate focused stock and subtotal tests over a long UI sequence if it makes the state clearer. For criteria preserving existing behavior, use the existing regression tests as the behavioral reference; do not invent new business rules.";
 const shippingGuidance =
-  'For ShippingProgress boundaries, determine the intended threshold from the acceptance criteria (use the baseline threshold when preserving behavior). Remaining dollars = max(0, threshold - subtotal). At subtotal 0, including after removing the FINAL cart item, a positive threshold means the full threshold remains and progress is 0%; it NEVER means free shipping is unlocked. For the unchanged $75 offer, assert "You\'re $75.00 away from free shipping." at $0.00, and "You unlocked free shipping!" with 100% progress at exactly $75.00 and above. If the issue changes the threshold, use that requested value instead of hardcoding $75. Removing items must recompute the shipping message; unlocked status is not sticky. Cover empty, below-threshold, exact-threshold and above-threshold states separately, using rerender for component boundaries and actual cart actions for removal regressions. On repair, correct only the invalid state expectation and retain the valid exact-threshold unlocked assertion (add a separate exact-threshold test if missing); never globally replace the unlocked message or delete boundary coverage.';
+  'For ShippingProgress boundaries, determine the intended threshold from the acceptance criteria (use the baseline threshold when preserving behavior). Remaining dollars = max(0, threshold - subtotal). Progress = max(0, min(100, subtotal / threshold * 100)); a positive subtotal below the threshold has POSITIVE progress, not zero. For a $64 cart and $299 threshold, progress is approximately 21.40468227424749; assert the numeric value with toBeCloseTo(64 / 299 * 100). At subtotal 0, including after removing the FINAL cart item, a positive threshold means the full threshold remains and progress is 0%; it NEVER means free shipping is unlocked. For the unchanged $75 offer, assert "You\'re $75.00 away from free shipping." at $0.00, and "You unlocked free shipping!" with 100% progress at exactly $75.00 and above. If the issue changes the threshold, use that requested value instead of hardcoding $75. Removing items must recompute the shipping message; unlocked status is not sticky. Cover empty, below-threshold, exact-threshold and above-threshold states separately, using rerender for component boundaries and actual cart actions for removal regressions. On repair, correct only the invalid state expectation and retain the valid exact-threshold unlocked assertion (add a separate exact-threshold test if missing); never globally replace the unlocked message or delete boundary coverage.';
 const manualGuidance =
-  "This repository uses Vitest/jsdom, which cannot verify rendered layout, clipping, focus-ring visibility or real viewport breakpoints. For a criterion mixing automated and visual/manual verification, test its automatable requirements and include concrete pending browser steps in manualVerification with the same criterionId. Include viewports, surfaces, actions and expected visual results; these steps will be retained in the draft PR for human review. Do not claim these checks ran. Every criterion still needs meaningful executable assertions for its automatable portion; a checklist does not replace those assertions. During pre-implementation test review, assess the assertions and completeness of the pending checklist, not results of browser checks that cannot have run yet. Reject missing checklists or checklists used to avoid automatable requirements. Do not demand browser tooling or dependencies absent from the repository.";
+  "This repository uses Vitest/jsdom with CSS processing disabled. Importing index.css does not populate document.styleSheets or computed styles. Inspect CSS source with readFileSync for token declarations, selector usage and media rules; never use CSSOM/getComputedStyle to test imported styles. This runner cannot verify rendered layout, clipping, focus-ring visibility or real viewport breakpoints. For a criterion mixing automated and visual/manual verification, test its automatable requirements and include concrete pending browser steps in manualVerification with the same criterionId. Include viewports, surfaces, actions and expected visual results; these steps will be retained in the draft PR for human review. Do not claim these checks ran. Every criterion still needs meaningful executable assertions for its automatable portion; a checklist does not replace those assertions. During pre-implementation test review, assess the assertions and completeness of the pending checklist, not results of browser checks that cannot have run yet. Reject missing checklists or checklists used to avoid automatable requirements. Do not demand browser tooling or dependencies absent from the repository.";
 
 export async function prepareAcceptance(
   id: string,
@@ -79,10 +88,27 @@ export async function prepareAcceptance(
       });
       continue;
     }
+    const preflight = acceptancePreflight(
+      id,
+      attempt,
+      tests,
+      criteria,
+      diagnosis.issue,
+    );
+    if (preflight.blockers.length) {
+      findings = preflight.blockers;
+      write(id, `acceptance-generation-${attempt}.json`, {
+        tests,
+        preflight,
+        findings,
+        status: "invalid",
+      });
+      continue;
+    }
     const review = await ask<AcceptanceReview>(
       id,
       "acceptance_review",
-      "Independently review ONLY the CANDIDATE ACCEPTANCE TEST CODE before product development. All application source and existing regression tests supplied below are the UNCHANGED PRE-ISSUE BASELINE. The feature is deliberately not implemented yet. Compare every criterion against issue, source, public interfaces and fixtures. Check React Testing Library DOM isolation, duplicate-role queries, proper rerender/unmount, valid fixtures and imports, boundary expectations and regression coverage. Static fixture checks do not prove cart stock/quantity enforcement; require behavioral API/UI assertions. Do not demand implementing new business rules. Coverage means the candidate contains valid behavioral assertions for the requested future behavior. It does NOT mean that the current product already passes them. For example, expect(FREE_SHIPPING_THRESHOLD).toBe(250) is valid covered threshold testing even while the baseline constant is 75. Findings such as the constant remains 75, App copy still says $75, or existing regression tests assert $75 are expected baseline failures, NEVER candidate-test defects. Do not report those findings or mark criteria missing because of them. Judge automated coverage solely from candidate assertions; use baseline source only to check public APIs, fixture validity and established behavior. Reject test-harness defects and omitted or trivial coverage. findings contains only blocking defects needing correction. Each criterion must appear exactly once with status covered or missing and concrete assertion evidence. Verify that evidence actually exists in candidateAcceptanceTests.code: do not claim an exact-threshold assertion exists merely because baseline regression tests contain one. Do not claim you ran tests. " +
+      "Independently review ONLY the CANDIDATE ACCEPTANCE TEST CODE before product development. All application source and existing regression tests supplied below are the UNCHANGED PRE-ISSUE BASELINE. The feature is deliberately not implemented yet. Compare every criterion against issue, source, public interfaces and fixtures. Check React Testing Library DOM isolation, duplicate-role queries, proper rerender/unmount, valid fixtures and imports, boundary expectations and regression coverage. Static fixture checks do not prove cart stock/quantity enforcement; require behavioral API/UI assertions. Do not demand implementing new business rules. Coverage means the candidate contains valid behavioral assertions for the requested future behavior. It does NOT mean that the current product already passes them. For example, expect(FREE_SHIPPING_THRESHOLD).toBe(250) is valid covered threshold testing even while the baseline constant is 75. Findings such as the constant remains 75, App copy still says $75, or existing regression tests assert $75 are expected baseline failures, NEVER candidate-test defects. Do not report those findings or mark criteria missing because of them. Judge automated coverage solely from candidate assertions; use baseline source only to check public APIs, fixture validity and established behavior. Reject test-harness defects and omitted or trivial coverage. findings contains only blocking defects needing correction. Each criterion must appear exactly once with status covered or missing and concrete assertion evidence. Verify that evidence actually exists in candidateAcceptanceTests.code: do not claim an exact-threshold assertion exists merely because baseline regression tests contain one. Executable preflight results are supplied. For EVERY preflight failure, return exactly one runtimeFindings entry with its id, classification and concrete evidence. expected-feature-failure means the assertion correctly demands a specified feature missing from the baseline; test-defect means invalid harness, API, math or expectation, and must be corrected. A requested-threshold-probe changes ONLY the shipping constant in a disposable copy; it does not change UI copy or implement unrelated features. In that probe, shipping arithmetic already uses the requested threshold: an assertion expecting 0% at a positive subtotal is a test-defect, not pending implementation. Never approve a test-defect. Require numerical calculations and the relevant issue requirement as evidence for expected-feature-failure; a generic claim that the feature is not implemented is insufficient. Do not claim you personally ran tests. " +
         queryGuidance +
         " " +
         cartGuidance +
@@ -98,9 +124,27 @@ export async function prepareAcceptance(
         // check existing DOM structure and APIs before implementation starts.
         baselineSources: repository.sources,
         candidateAcceptanceTests: tests,
+        preflight: {
+          ...preflight,
+          failures: preflight.failures.map((failure) => ({
+            ...failure,
+            message: failure.message.slice(0, 4000),
+          })),
+        },
       },
       objectSchema({
         valid: { type: "boolean" },
+        runtimeFindings: {
+          type: "array",
+          items: objectSchema({
+            id: stringSchema,
+            classification: {
+              type: "string",
+              enum: ["expected-feature-failure", "test-defect"],
+            },
+            evidence: stringSchema,
+          }),
+        },
         findings: stringsSchema,
         criteria: {
           type: "array",
@@ -120,7 +164,10 @@ export async function prepareAcceptance(
             (r) => r.id === c.id && r.status === "covered" && r.evidence.trim(),
           ).length === 1,
       );
-    findings = review.findings;
+    findings = [
+      ...review.findings,
+      ...validateRuntimeReview(preflight, review.runtimeFindings ?? []),
+    ];
     if (!covered)
       findings = [
         ...findings,
@@ -130,6 +177,7 @@ export async function prepareAcceptance(
       findings = ["Independent review rejected test validity"];
     write(id, `acceptance-generation-${attempt}.json`, {
       tests,
+      preflight,
       review,
       findings,
       status:
@@ -143,4 +191,29 @@ export async function prepareAcceptance(
     `## Acceptance test generation stopped\n\nWork record: \`${id}\`. Product implementation has not started.\n\n${message}\n\nDownload this run's Actions artifact and inspect \`work/${id}/acceptance-generation-0.json\` through \`acceptance-generation-2.json\` for candidate tests and validation findings. Correct test generation without weakening the acceptance criteria, push the correction to the default branch, then run the issue workflow again with the same issue number.\n`,
   );
   throw new Error(message);
+}
+
+export function validateRuntimeReview(
+  preflight: AcceptancePreflight,
+  assessments: AcceptanceReview["runtimeFindings"],
+) {
+  const findings: string[] = [];
+  for (const failure of preflight.failures) {
+    const matches = assessments.filter((entry) => entry.id === failure.id);
+    if (matches.length !== 1 || !matches[0].evidence.trim())
+      findings.push(
+        `Executable preflight failure ${failure.id} requires exactly one evidence-based classification: ${failure.name}`,
+      );
+    else if (matches[0].classification !== "expected-feature-failure")
+      findings.push(
+        `Executable acceptance test defect ${failure.id}: ${matches[0].evidence}`,
+      );
+  }
+  if (
+    assessments.some(
+      (entry) => !preflight.failures.some((failure) => failure.id === entry.id),
+    )
+  )
+    findings.push("Runtime review references unknown preflight failures");
+  return findings;
 }

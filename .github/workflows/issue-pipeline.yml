@@ -45,6 +45,10 @@ jobs:
           cache: pnpm
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+      - name: Verify baseline before spending API repair budget
+        run: |
+          pnpm typecheck
+          pnpm exec vitest run --maxWorkers=2
       - name: Require hosted Valkey configuration
         run: |
           if [[ -z "$VALKEY_URL" ]]; then

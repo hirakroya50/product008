@@ -73,7 +73,20 @@ export function validateAcceptance(
   function callName(node: AstNode) {
     return node.callee?.name ?? node.callee?.property?.name;
   }
+  const importsCss = /import\s+(?:[\s\S]*?from\s+)?["'][^"']+\.css["']/.test(
+    tests.code,
+  );
   function inspectTest(node: AstNode) {
+    if (
+      importsCss &&
+      ((node.type === "CallExpression" &&
+        callName(node) === "getComputedStyle") ||
+        (node.type === "MemberExpression" &&
+          node.property?.name === "styleSheets"))
+    )
+      throw new Error(
+        "Imported CSS is not loaded into jsdom by this Vitest configuration. Test tokens, selector declarations and media rules from CSS source (readFileSync), and retain pending browser checks for visual rendering; do not use getComputedStyle/document.styleSheets for imported CSS.",
+      );
     if (
       node.type === "CallExpression" &&
       ["it", "test"].includes(callName(node) ?? "")

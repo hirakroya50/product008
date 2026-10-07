@@ -1,4 +1,4 @@
-import { read, write, fingerprint, type Draft } from "../common";
+import { read, write, fingerprint, safePath, type Draft } from "../common";
 import { developer } from "./developer";
 import { investigationSummary } from "../investigation";
 import { tester, type TestRecord } from "./tester";
@@ -27,6 +27,47 @@ function assertRepairable(id: string, record: TestRecord) {
     );
     throw new Error(
       `Runner failure prevents reliable code repair. Run pnpm harness inspect --work ${id}; see work/${id}/investigation.md`,
+    );
+  }
+  const frozenTypeErrors = record.checks.some(
+    (check) =>
+      check.name === "typecheck" &&
+      check.status !== "passed" &&
+      /src\/__tests__\/issue-acceptance\.test\.tsx\(\d+,\d+\): error TS/.test(
+        check.log,
+      ),
+  );
+  const protectedFailures = record.checks
+    .flatMap((check) => check.failures ?? [])
+    .filter((failure) => {
+      const relative = failure.file
+        .replace(/\\/g, "/")
+        .match(/(?:^|\/)(src\/__tests__\/[^/]+)$/)?.[1];
+      if (!relative || relative.endsWith("/issue-acceptance.test.tsx"))
+        return false;
+      try {
+        safePath(relative);
+        return false;
+      } catch {
+        return true;
+      }
+    });
+  if (frozenTypeErrors || protectedFailures.length) {
+    const reason = [
+      ...(frozenTypeErrors
+        ? [
+            "The frozen acceptance contract has TypeScript errors; regenerate and validate acceptance before product repair.",
+          ]
+        : []),
+      ...(protectedFailures.length
+        ? [
+            `Protected harness tests failed: ${[...new Set(protectedFailures.map((failure) => failure.name))].join("; ")}. Fix the baseline harness; product edits cannot repair these tests.`,
+          ]
+        : []),
+    ].join(" ");
+    investigationSummary(id, reason);
+    throw new Error(
+      `Unrepairable test infrastructure: ${reason} See work/${id}/investigation.md`,
     );
   }
 }

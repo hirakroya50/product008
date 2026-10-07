@@ -43,7 +43,7 @@ export function safePath(p: string) {
     ) ||
     p.split("/").some((part) => part === ".." || part === "." || !part) ||
     p.startsWith("src/harness/") ||
-    /^src\/__tests__\/(?:setup|harness|shipping-request|valkey|pipeline-quality|test-report|retry|issue-acceptance)\./.test(
+    /^src\/__tests__\/(?:setup|harness|shipping-request|valkey|pipeline-quality|acceptance-preflight|test-report|retry|issue-acceptance)\./.test(
       p,
     )
   )
