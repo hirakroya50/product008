@@ -25,6 +25,9 @@ import { triager } from "../harness/workers/triager";
 import { prepareAcceptance } from "../harness/workers/acceptance";
 import { fitter } from "../harness/workers/fitter";
 import { developer } from "../harness/workers/developer";
+import * as developerWorker from "../harness/workers/developer";
+import * as testerWorker from "../harness/workers/tester";
+import { fixer } from "../harness/workers/fixer";
 import { ask, objectSchema, stringSchema } from "../harness/ai";
 import * as common from "../harness/common";
 import type { TestRecord } from "../harness/workers/tester";
@@ -588,6 +591,121 @@ describe("acceptance and review gates", () => {
     ).toContain("multiple roots");
   });
 
+  it("repairs issue 16 duplicate queries using independent review feedback", async () => {
+    aiMode();
+    const id = fixture();
+    write(id, "cost-approval.json", { approvedCost: true });
+    const cartCriteria = [
+      { id: "AC-7", description: "Preserve cart behavior" },
+    ];
+    const faulty = `it('AC-7 cart behavior',()=>{render(<App/>);fireEvent.click(screen.getAllByRole('button',{name:/Add to bag/})[0]);fireEvent.click(screen.getByRole('button',{name:'Increase Out of Office'}));expect(screen.getByText('$64.00')).toBeInTheDocument();fireEvent.click(screen.getByRole('button',{name:'Checkout'}));expect(screen.getByRole('status')).toHaveTextContent(/Demo checkout ready/);});`;
+    const corrected = faulty
+      .replace(
+        "expect(screen.getByText('$64.00')).toBeInTheDocument()",
+        "expect(screen.getAllByText('$64.00')).toHaveLength(2)",
+      )
+      .replace(
+        "expect(screen.getByRole('status')).toHaveTextContent(/Demo checkout ready/)",
+        "expect(screen.getByText(/Demo checkout ready/)).toHaveAttribute('role','status')",
+      );
+    const findings = [
+      "AC-7: item price and subtotal both render $64.00; use a scoped or plural query.",
+      "AC-7: shipping and checkout both have role status; select the checkout message uniquely.",
+    ];
+    create.mockResolvedValueOnce(reply({ code: faulty }));
+    create.mockResolvedValueOnce(
+      reply({
+        valid: false,
+        findings,
+        criteria: [
+          { id: "AC-7", status: "missing", evidence: "Ambiguous queries" },
+        ],
+      }),
+    );
+    create.mockResolvedValueOnce(reply({ code: corrected }));
+    create.mockResolvedValueOnce(approvedAcceptance(cartCriteria));
+    const diagnosis = {
+      issue: read<Issue>(id, "intake.json"),
+      actionable: true,
+      reason: "Rounded styling with unchanged cart behavior",
+      severity: "P3",
+      subsystems: ["cart"],
+      reproducible: true,
+    };
+    const tests = await prepareAcceptance(
+      id,
+      diagnosis,
+      cartCriteria,
+      {},
+      repository.repositoryContext(),
+    );
+    expect(tests.code).toContain('getAllByText("$64.00")');
+    expect(tests.code).toContain("getByText(/Demo checkout ready/)");
+    const repairRequest = create.mock.calls[2][0];
+    const repairInput = JSON.parse(repairRequest.input);
+    expect(repairInput.previousTests.code).toContain('getByText("$64.00")');
+    expect(repairInput.validationFindings).toEqual(
+      expect.arrayContaining(findings),
+    );
+    expect(repairRequest.instructions).toContain("REPAIR of previousTests");
+    expect(repairRequest.instructions).toContain(
+      "One render can still contain duplicate text or roles",
+    );
+    expect(
+      read<{ status: string }>(id, "acceptance-generation-1.json").status,
+    ).toBe("approved");
+  });
+
+  it("keeps the acceptance gate closed and explains exhausted generation attempts", async () => {
+    aiMode();
+    const id = fixture();
+    write(id, "cost-approval.json", { approvedCost: true });
+    const findings = ["Cart status query is ambiguous"];
+    for (let attempt = 0; attempt < 3; attempt++) {
+      create.mockResolvedValueOnce(
+        reply({
+          code: `it('AC-1 cart',()=>{expect(screen.getByRole('status')).toBeTruthy();});`,
+        }),
+      );
+      create.mockResolvedValueOnce(
+        reply({
+          valid: false,
+          findings,
+          criteria: [
+            { id: "AC-1", status: "covered", evidence: "status assertion" },
+          ],
+        }),
+      );
+    }
+    await expect(
+      prepareAcceptance(
+        id,
+        {
+          issue: read<Issue>(id, "intake.json"),
+          actionable: true,
+          reason: "Cart",
+          severity: "P3",
+          subsystems: ["cart"],
+          reproducible: true,
+        },
+        criteria,
+        {},
+        repository.repositoryContext(),
+      ),
+    ).rejects.toThrow("after 3 attempts");
+    expect(create).toHaveBeenCalledTimes(6);
+    const summary = fs.readFileSync(
+      path.join(workDir(id), "investigation.md"),
+      "utf8",
+    );
+    expect(summary).toContain("Product implementation has not started");
+    expect(summary).toContain(findings[0]);
+    expect(summary).toContain("acceptance-generation-2.json");
+    expect(fs.existsSync(path.join(workDir(id), "acceptance-tests.json"))).toBe(
+      false,
+    );
+  });
+
   it("rejects missing, skipped, mocked and assertion-free acceptance tests", () => {
     const good = `it('AC-1 behavior', () => { expect(subtotal([])).toBe(0); });`;
     expect(() => validateAcceptance({ code: good }, criteria)).not.toThrow();
@@ -809,6 +927,26 @@ describe("API execution boundaries", () => {
       vi.useRealTimers();
     }
   });
+  it("stops without retrying when credits are exhausted and saves diagnostics", async () => {
+    aiMode();
+    const id = fixture();
+    write(id, "cost-approval.json", { approvedCost: true });
+    create.mockRejectedValueOnce({
+      status: 429,
+      code: "insufficient_quota",
+      message: "No credits remaining",
+    });
+    await expect(
+      ask(id, "triager", "test", {}, objectSchema({ value: stringSchema })),
+    ).rejects.toMatchObject({ status: 429 });
+    expect(create).toHaveBeenCalledTimes(1);
+    expect(read<{ kind: string }>(id, "api-failure.json").kind).toBe("quota");
+    expect(
+      read<{ calls: { status: string }[] }>(id, "api-usage.json").calls.map(
+        (call) => call.status,
+      ),
+    ).toEqual(["failed"]);
+  });
   it("caps paid requests, including failed calls", async () => {
     aiMode();
     const id = fixture();
@@ -821,4 +959,74 @@ describe("API execution boundaries", () => {
     ).rejects.toThrow("budget");
     expect(create).not.toHaveBeenCalled();
   });
+});
+
+describe("repair loop infrastructure failures", () => {
+  it.each(["provider", "runner"])(
+    "stops immediately when a %s failure appears after a repair",
+    async (kind) => {
+      const id = fixture();
+      write(id, "draft.json", { maxCycles: 3 });
+      const initial = {
+        status: "failed",
+        cycle: 0,
+        fingerprint: "before-repair",
+        checks: [
+          {
+            name: "test",
+            status: "failed",
+            exitCode: 1,
+            log: "Assertion failed",
+          },
+        ],
+      } as TestRecord;
+      write(id, "test-record.json", initial);
+      vi.spyOn(common, "fingerprint").mockReturnValue("after-repair");
+      const repair = vi.spyOn(developerWorker, "developer").mockResolvedValue({
+        mode: "openai",
+        repair: true,
+        changedFiles: ["src/cart.ts"],
+        hashes: {},
+        applied: true,
+      });
+      const next = {
+        ...initial,
+        cycle: 1,
+        fingerprint: "after-repair",
+        checks:
+          kind === "provider"
+            ? [
+                {
+                  name: "review",
+                  status: "failed",
+                  exitCode: 1,
+                  log: "No credits remaining",
+                  failureKind: "provider" as const,
+                },
+              ]
+            : [
+                {
+                  name: "test",
+                  status: "failed",
+                  exitCode: null,
+                  signal: "SIGKILL",
+                  log: "ETIMEDOUT",
+                },
+              ],
+      } as TestRecord;
+      vi.spyOn(testerWorker, "tester").mockImplementation(async () =>
+        write(id, "test-record.json", next),
+      );
+      await expect(fixer(id)).rejects.toThrow(
+        kind === "provider" ? "Review provider unavailable" : "Runner failure",
+      );
+      expect(repair).toHaveBeenCalledTimes(1);
+      expect(read<{ attempts: unknown[] }>(id, "cycles.json").attempts).toEqual(
+        [{ cycle: 1, status: "failed" }],
+      );
+      expect(
+        fs.readFileSync(path.join(workDir(id), "investigation.md"), "utf8"),
+      ).toContain(kind === "provider" ? "provider failure" : "Runner failure");
+    },
+  );
 });

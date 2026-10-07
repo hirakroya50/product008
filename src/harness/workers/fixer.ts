@@ -2,9 +2,7 @@ import { read, write, fingerprint, type Draft } from "../common";
 import { developer } from "./developer";
 import { investigationSummary } from "../investigation";
 import { tester, type TestRecord } from "./tester";
-export async function fixer(id: string) {
-  let record = read<TestRecord>(id, "test-record.json");
-  const draft = read<Draft>(id, "draft.json");
+function assertRepairable(id: string, record: TestRecord) {
   if (record.checks.some((check) => check.failureKind === "provider")) {
     investigationSummary(
       id,
@@ -31,6 +29,11 @@ export async function fixer(id: string) {
       `Runner failure prevents reliable code repair. Run pnpm harness inspect --work ${id}; see work/${id}/investigation.md`,
     );
   }
+}
+export async function fixer(id: string) {
+  let record = read<TestRecord>(id, "test-record.json");
+  const draft = read<Draft>(id, "draft.json");
+  assertRepairable(id, record);
   const attempts = [];
   let previousFingerprint = record.fingerprint;
   while (record.status !== "passed" && record.cycle < draft.maxCycles) {
@@ -54,6 +57,12 @@ export async function fixer(id: string) {
     record = await tester(id, record.cycle + 1);
     previousFingerprint = record.fingerprint;
     attempts.push({ cycle: record.cycle, status: record.status });
+    write(id, "cycles.json", {
+      maxCycles: draft.maxCycles,
+      attempts,
+      status: record.status,
+    });
+    assertRepairable(id, record);
   }
   write(id, "cycles.json", {
     maxCycles: draft.maxCycles,
