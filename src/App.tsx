@@ -6,6 +6,8 @@ import { addItem, changeQuantity } from "./cart";
 import { Navbar } from "./components/Navbar";
 import { ProductCard } from "./components/ProductCard";
 import { CartDrawer } from "./components/CartDrawer";
+import { FREE_SHIPPING_THRESHOLD } from "./components/ShippingProgress";
+
 export default function App() {
   const [items, setItems] = useState<CartItem[]>([]);
   const [open, setOpen] = useState(false);
@@ -85,7 +87,7 @@ export default function App() {
             <Leaf size={18} /> Better cotton, better comfort
           </span>
           <span>
-            <Package size={18} /> Free shipping over $75
+            <Package size={18} /> Free shipping over ${FREE_SHIPPING_THRESHOLD}
           </span>
           <span>
             <Heart size={18} /> Made to be your favorite
