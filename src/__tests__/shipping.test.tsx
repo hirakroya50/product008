@@ -1,32 +1,47 @@
 import { describe, it, expect } from "vitest";
 import { render, screen } from "@testing-library/react";
 import {
+  FREE_SHIPPING_THRESHOLD,
   ShippingProgress,
   shippingProgress,
 } from "../components/ShippingProgress";
 import { CartDrawer } from "../components/CartDrawer";
 import { products } from "../data/products";
+
 describe("free shipping", () => {
+  it("uses the canonical threshold and clamps progress", () => {
+    expect(FREE_SHIPPING_THRESHOLD).toBe(194);
+    expect(shippingProgress(-10)).toBe(0);
+    expect(shippingProgress(0)).toBe(0);
+    expect(shippingProgress(64)).toBeCloseTo((64 / 194) * 100);
+    expect(shippingProgress(97)).toBeCloseTo(50);
+    expect(shippingProgress(194)).toBe(100);
+    expect(shippingProgress(250)).toBe(100);
+  });
+
   it.each([
-    [0, 0],
-    [37.5, 50],
-    [75, 100],
-    [100, 100],
-    [-10, 0],
-  ])("clamps subtotal %s to progress %s", (total, expected) => {
-    expect(shippingProgress(total)).toBe(expected);
+    [32, "$162.00 away"],
+    [64, "$130.00 away"],
+    [193.99, "$0.01 away"],
+  ])("shows the remaining amount for subtotal %s", (subtotal, message) => {
+    render(<ShippingProgress subtotal={subtotal} />);
+    expect(screen.getByRole("status")).toHaveTextContent(message);
   });
-  it("shows remaining dollars", () => {
-    render(<ShippingProgress subtotal={32} />);
-    expect(screen.getByRole("status")).toHaveTextContent("$43.00 away");
-  });
-  it("qualifies exactly at threshold", () => {
-    render(<ShippingProgress subtotal={75} />);
+
+  it("qualifies exactly at the threshold and remains unlocked above it", () => {
+    const view = render(<ShippingProgress subtotal={194} />);
     expect(screen.getByRole("status")).toHaveTextContent(
       "You unlocked free shipping",
     );
+
+    view.rerender(<ShippingProgress subtotal={250} />);
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "You unlocked free shipping",
+    );
+    expect(screen.getByRole("progressbar")).toHaveAttribute("value", "100");
   });
-  it("integrates with actual cart subtotal", () => {
+
+  it("integrates with the actual cart subtotal", () => {
     render(
       <CartDrawer
         items={[
@@ -41,19 +56,23 @@ describe("free shipping", () => {
         onQuantity={() => {}}
       />,
     );
-    expect(screen.getByRole("status")).toHaveTextContent("$11.00 away");
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "$130.00 away from free shipping.",
+    );
+    expect(screen.getAllByText("$64.00")).toHaveLength(2);
   });
 });
 
 it("returns to the full remaining amount after an unlocked subtotal becomes empty", () => {
-  const view = render(<ShippingProgress subtotal={75} />);
+  const view = render(<ShippingProgress subtotal={194} />);
   expect(screen.getByRole("status")).toHaveTextContent(
     "You unlocked free shipping!",
   );
   expect(screen.getByRole("progressbar")).toHaveAttribute("value", "100");
+
   view.rerender(<ShippingProgress subtotal={0} />);
   expect(screen.getByRole("status")).toHaveTextContent(
-    "You're $75.00 away from free shipping.",
+    "You're $194.00 away from free shipping.",
   );
   expect(screen.getByRole("progressbar")).toHaveAttribute("value", "0");
   expect(
