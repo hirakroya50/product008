@@ -1,4 +1,4 @@
-export const FREE_SHIPPING_THRESHOLD = 194;
+export const FREE_SHIPPING_THRESHOLD = 499;
 
 export function shippingProgress(total: number) {
   return Math.max(0, Math.min(100, (total / FREE_SHIPPING_THRESHOLD) * 100));
