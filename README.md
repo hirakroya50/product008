@@ -1,17 +1,144 @@
-# Product 008 · ThreadCraft
+# Issue to Reviewed PR · ThreadCraft
 
-React 18 / TypeScript / Vite / Tailwind store with an issue-to-draft-PR harness and an explicit offline shipping demonstration.
+Turn a GitHub issue into a tested, independently reviewed **draft pull request**, with evidence for a maintainer to inspect before merging. This repository combines an AI development workflow with **ThreadCraft**, a React storefront used to demonstrate real application changes.
+
+## The problem it solves
+
+An issue-to-code automation needs more than a generated patch: it needs a clear scope, tests tied to the requested behavior, regression checks, review, and a record of what actually ran. This project automates those steps, blocks publication when required checks fail, and preserves failure evidence for investigation. A maintainer still reviews the draft PR and completes any pending browser checks before merging.
+
+## What has been built
+
+- **ThreadCraft storefront:** product search, category filters, price sorting, size/color selection, stock-aware cart quantities, subtotal calculation, and free-shipping progress. Checkout is a UI simulation; it does not collect payments. Product images are local SVGs.
+- **Issue intake and planning:** local JSON or GitHub issues become repository-aware diagnoses, documented assumptions, scoped implementation plans, and acceptance criteria.
+- **Independent acceptance tests:** tests are generated and reviewed before development, then frozen so the Developer and Fixer cannot change their contract.
+- **Implementation and repair:** the Developer applies the plan; the Fixer uses failed assertions and review findings for up to three repair retries.
+- **Quality and publication gates:** type checking, production build, regressions, changed-file formatting, diff hygiene, independent acceptance tests, and review must pass before a commit. Publication checks bind the reviewed evidence to the commit.
+- **Audit and failure investigation:** per-cycle reports, source snapshots, patches, API usage, and PR summaries are saved under `work/`.
+- **GitHub automation:** issue events run the pipeline on macOS and publish a draft PR; PR quality checks validate subsequent updates. Separate workflows upload successful production builds to the configured S3 prefix.
+
+The current storefront shipping threshold is **$499**, defined in `src/components/ShippingProgress.tsx`. The offline sample requests **$75**; running it may change the application threshold.
+
+## How the workflow works
+
+```mermaid
+flowchart TD
+    A[GitHub issue or local JSON] --> B[Triager: scope and assumptions]
+    B --> C[Fitter: plan and acceptance criteria]
+    C --> D[Independent acceptance test generation and review]
+    D --> E[Developer: implement the plan]
+    E --> F[Sandboxed checks and independent code review]
+    F -->|Repairable failure| G[Fixer: bounded repair]
+    G --> F
+    F -->|All required checks pass| H[Quality-gated commit and audit evidence]
+    H --> I[Publication integrity check]
+    I --> J[GitHub workflow: push branch and create draft PR]
+    J --> K[Maintainer review and pending manual checks]
+```
+
+Blocking questions, invalid acceptance tests, exhausted repair limits, and provider/runner failures stop the run with diagnostic artifacts. Local scripts stop at a local commit and PR summary; remote publication happens in the GitHub workflow. There is no automatic merge.
+
+## Skills and tools used
+
+The implemented skills are worker capabilities in `src/harness/workers/`:
+
+| Skill / role             | Responsibility                                                                                                |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------- |
+| Triager                  | Read the issue and repository, identify scope, resolve supported assumptions, and surface blocking questions. |
+| Fitter                   | Select justified application and regression-test paths and build the implementation plan.                     |
+| Acceptance test engineer | Generate independent tests, validate fixtures and DOM isolation, and record manual checks.                    |
+| Developer                | Implement the approved plan within its allowed paths.                                                         |
+| Tester                   | Execute isolated checks and preserve detailed test evidence.                                                  |
+| Reviewer                 | Independently assess completeness, regressions, and acceptance-test validity.                                 |
+| Fixer                    | Repair actionable failures within the retry budget.                                                           |
+
+These are application worker roles. The repository does not record which external Codex `SKILL.md` packages were used during its development.
+
+**Stack:** React 18, TypeScript, Vite, Tailwind CSS, Vitest, React Testing Library, OpenAI Responses API, GitHub CLI/Actions, Valkey through `ioredis`, native macOS `sandbox-exec`, and S3 build uploads. Offline mode uses deterministic shipping-specific behavior; AI mode uses the configured model for broader application issues.
+
+## How to use it
+
+### 1. Run the storefront
+
+Use Node.js 22 and pnpm 10.26.2 to match CI:
 
 ```bash
-pnpm install
+git clone https://github.com/hirakroya50/product008.git
+cd product008
+pnpm install --frozen-lockfile
 pnpm dev
+```
+
+Open the local URL printed by Vite. Browse products, choose variants, add items, and change quantities to see cart totals and shipping progress update.
+
+### 2. Verify the application
+
+```bash
 pnpm typecheck
-pnpm build
 pnpm test
+pnpm build
+pnpm harness help
+```
+
+### 3. Run the offline issue-to-commit demo
+
+The harness runner requires **macOS with `sandbox-exec`** and a **clean, committed Git checkout**. No OpenAI key is needed for the offline demo.
+
+```bash
+pnpm harness doctor
 pnpm demo
 ```
 
-The demo requires a clean Git checkout and creates a local `codex/issue-*` branch and commit. It never pushes, publishes a remote PR, merges, deploys, or collects payments. Checkout is a UI simulation. Catalog assets are local SVGs.
+The demo reads `docs/product-008/sample-issue.json`, verifies or implements the $75 shipping feature, runs the quality gates, and creates a local `codex/issue-*` branch and commit when changes are needed. It saves a PR summary under `work/<work-id>/pr-summary.md` and audit evidence in `docs/product-008/evidence.json`. It does not push or create a remote PR. Repeated runs verify an already-applied feature without manufacturing a change.
+
+### 4. Process a real GitHub issue locally
+
+Authenticate the GitHub CLI with `gh auth login`. Copy `.env.example` to `.env`, set `HARNESS_MODE=openai`, and supply `OPENAI_API_KEY` and an explicit `OPENAI_MODEL` supporting strict structured outputs. Optionally set `VALKEY_URL` for shared leases. Keep `.env` private.
+
+```bash
+cp .env.example .env
+# Edit .env with your configuration before continuing.
+set -a
+source .env
+set +a
+bash scripts/run-issue.sh 123
+```
+
+Replace `123` with your issue number. This script approves paid API usage for the run and can create a local branch and commit; it stops before remote publication. API execution is limited to 16 recorded requests, including retries. For the deterministic shipping workflow, explicitly use `HARNESS_MODE=offline` instead.
+
+To inspect a failed run without API calls:
+
+```bash
+pnpm harness inspect --work YOUR_WORK_ID
+```
+
+### 5. Enable automatic GitHub draft PRs
+
+Follow the full [GitHub issue → draft PR setup guide](docs/product-008/github-demo.md). In brief:
+
+1. Ensure the four files in `.github/workflows/` are on the default branch and Actions is enabled.
+2. Configure Actions secrets `OPENAI_API_KEY` and `VALKEY_URL`, plus `OPENAI_MODEL` as a secret or variable. AI mode is the default; explicit offline mode does not require an OpenAI key.
+3. Enable **Allow GitHub Actions to create and approve pull requests** in repository Actions settings. The workflow creates drafts and does not approve or merge them.
+4. Open or reopen an application issue, or manually run **Product 008 - Reviewed issue to draft PR** with an issue number.
+5. Review the resulting draft PR, its evidence, and pending browser checks. Require **PR quality / quality** and maintainer approval through branch protection.
+
+Example issue: **Change the free shipping threshold to $100**. Specify that progress should update with subtotal, clamp at 100%, show unlocked messaging at or above $100, and preserve cart stock behavior.
+
+S3 uploads use the repository's existing bucket configuration and require AWS Actions secrets; see [Pull request builds in S3](#pull-request-builds-in-s3). They upload build files, not a complete hosted checkout/payment service.
+
+## Repository map
+
+| Path                                            | Contents                                                                      |
+| ----------------------------------------------- | ----------------------------------------------------------------------------- |
+| `src/App.tsx`, `src/components/`, `src/cart.ts` | Storefront and cart behavior                                                  |
+| `src/harness/`                                  | CLI, orchestration, workers, quality gates, evidence, leases, and diagnostics |
+| `src/__tests__/`                                | Storefront and harness regression tests                                       |
+| `scripts/demo.sh`                               | Offline local demonstration                                                   |
+| `scripts/run-issue.sh`                          | GitHub issue intake through local commit and audit                            |
+| `.github/workflows/`                            | Issue pipeline, PR validation, and build uploads                              |
+| `docs/product-008/`                             | Sample issues and detailed GitHub setup                                       |
+| `work/`                                         | Ignored run artifacts; retain these when sharing audit evidence               |
+
+The sections below document execution safeguards, audit scope, and deployment configuration in more detail.
 
 ## Stage A pipeline
 
