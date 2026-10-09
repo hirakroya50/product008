@@ -62,8 +62,8 @@ These are application worker roles. The repository does not record which externa
 Use Node.js 22 and pnpm 10.26.2 to match CI:
 
 ```bash
-git clone https://github.com/hirakroya50/product008.git
-cd product008
+git clone https://github.com/hirakroya50/issue-to-reviewed-pr.git
+cd issue-to-reviewed-pr
 pnpm install --frozen-lockfile
 pnpm dev
 ```
