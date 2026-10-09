@@ -6,6 +6,7 @@ import { addItem, changeQuantity } from "./cart";
 import { Navbar } from "./components/Navbar";
 import { ProductCard } from "./components/ProductCard";
 import { CartDrawer } from "./components/CartDrawer";
+
 export default function App() {
   const [items, setItems] = useState<CartItem[]>([]);
   const [open, setOpen] = useState(false);
@@ -27,10 +28,12 @@ export default function App() {
           ? b.price - a.price
           : 0,
     );
+
   function add(p: Product, size: string, color: string) {
     setItems((i) => addItem(i, p, size, color));
     setOpen(true);
   }
+
   return (
     <>
       <Navbar
@@ -85,7 +88,7 @@ export default function App() {
             <Leaf size={18} /> Better cotton, better comfort
           </span>
           <span>
-            <Package size={18} /> Free shipping over $75
+            <Package size={18} /> Free shipping over $199
           </span>
           <span>
             <Heart size={18} /> Made to be your favorite
