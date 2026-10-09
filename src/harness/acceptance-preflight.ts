@@ -21,6 +21,7 @@ export interface AcceptancePreflight {
   checks: PreflightCheck[];
   failures: PreflightFailure[];
   probe?: { path: string; threshold: number };
+  unchangedProbeFailures?: TestFailure[];
 }
 
 // A diagnostic probe, never a product patch: exposes assertions hidden behind
@@ -155,13 +156,34 @@ export function acceptancePreflight(
         throw new Error(
           `Acceptance preflight run failed outside assertions (${scenario}): ${summary.summary}`,
         );
-      for (const failure of summary.failures)
+      for (const failure of summary.failures) {
+        // Keep unchanged assertions in baseline review; a constant-only probe
+        // must not present duplicate copy failures as new diagnostic evidence.
+        const relativeFailure = {
+          ...failure,
+          file: path.relative(dir, failure.file),
+        };
+        if (
+          scenario === "requested-threshold-probe" &&
+          result.failures.some(
+            (baseline) =>
+              baseline.scenario === "baseline" &&
+              baseline.file === relativeFailure.file &&
+              baseline.name === failure.name &&
+              baseline.status === failure.status &&
+              baseline.message === failure.message,
+          )
+        ) {
+          (result.unchangedProbeFailures ??= []).push(relativeFailure);
+          continue;
+        }
         result.failures.push({
           ...failure,
           file: path.relative(dir, failure.file),
           id: `${scenario}-${result.failures.length + 1}`,
           scenario,
         });
+      }
     }
     runTests("baseline");
     const shippingPath = "src/components/ShippingProgress.tsx";

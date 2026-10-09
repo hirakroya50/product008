@@ -1,0 +1,44 @@
+name: PR production build to S3
+on:
+  workflow_run:
+    workflows: [PR quality]
+    types: [completed]
+permissions:
+  actions: read
+  contents: read
+  pull-requests: read
+jobs:
+  resolve:
+    if: github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'pull_request'
+    runs-on: ubuntu-latest
+    outputs:
+      branch: ${{ steps.pr.outputs.branch }}
+    steps:
+      - uses: actions/github-script@v7
+        id: pr
+        with:
+          script: |
+            const run = context.payload.workflow_run;
+            if (run.repository.full_name !== `${context.repo.owner}/${context.repo.repo}`) {
+              throw new Error('Unexpected workflow repository');
+            }
+            const prs = await github.paginate(github.rest.pulls.list, {
+              ...context.repo, state: 'open', per_page: 100
+            });
+            const pr = prs.find(pr => pr.head.sha === run.head_sha &&
+              pr.head.ref === run.head_branch &&
+              pr.head.repo?.full_name === run.head_repository?.full_name);
+            if (!pr) {
+              core.notice('No current open PR matches this build; skipping stale upload.');
+              return;
+            }
+            core.setOutput('branch', pr.head.ref);
+  upload:
+    needs: resolve
+    if: needs.resolve.outputs.branch != ''
+    uses: ./.github/workflows/s3-upload.yml
+    with:
+      branch: ${{ needs.resolve.outputs.branch }}
+      run_id: ${{ format('{0}', github.event.workflow_run.id) }}
+      artifact: pr-dist
+    secrets: inherit

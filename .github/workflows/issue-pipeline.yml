@@ -9,6 +9,7 @@ on:
         required: true
         type: string
 permissions:
+  actions: read
   contents: write
   issues: read
   pull-requests: write
@@ -17,11 +18,9 @@ concurrency:
   cancel-in-progress: false
 jobs:
   pipeline:
-    # Only repository owners/collaborators/members can initiate this demo automatically.
-    # if: >-
-    #   github.event_name == 'workflow_dispatch' ||
-    #   contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.issue.author_association)
     if: github.event_name == 'workflow_dispatch' || github.event_name == 'issues'
+    outputs:
+      branch: ${{ steps.publish.outputs.branch }}
     runs-on: macos-15
     timeout-minutes: 40
     env:
@@ -60,6 +59,7 @@ jobs:
         id: engine
         run: bash scripts/run-issue.sh "$ISSUE_NUMBER"
       - name: Publish draft PR for human review
+        id: publish
         env:
           WORK_ID: ${{ steps.engine.outputs.work_id }}
         run: |
@@ -80,8 +80,9 @@ jobs:
             pr_url="$(gh pr create --draft --base "$BASE_BRANCH" --head "$branch" --title "$title" --body-file "work/$WORK_ID/pr-summary.md")"
           fi
           printf 'Draft PR awaiting human review: %s\n' "$pr_url" >> "$GITHUB_STEP_SUMMARY"
-          printf 'If GitHub shows an Approve workflows to run banner, approve the PR quality run and wait for it to pass before merging.\n' >> "$GITHUB_STEP_SUMMARY"
+          printf 'This pipeline verified the generated change; GITHUB_TOKEN-created PRs do not trigger PR quality automatically.\n' >> "$GITHUB_STEP_SUMMARY"
           printf '%s\n' "$pr_url" > "work/$WORK_ID/pr-url.txt"
+          printf 'branch=%s\n' "$branch" >> "$GITHUB_OUTPUT"
       - name: Show investigation details on failure
         if: failure() && steps.engine.outputs.work_id != ''
         env:
@@ -102,3 +103,23 @@ jobs:
             docs/product-008/evidence.json
           if-no-files-found: warn
           retention-days: 14
+      - name: Build published branch for S3
+        if: steps.publish.outputs.branch != ''
+        run: pnpm build
+      - name: Preserve published branch production build
+        if: steps.publish.outputs.branch != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: issue-dist
+          path: dist/
+          if-no-files-found: error
+          retention-days: 7
+  upload:
+    needs: pipeline
+    if: needs.pipeline.outputs.branch != ''
+    uses: ./.github/workflows/s3-upload.yml
+    with:
+      branch: ${{ needs.pipeline.outputs.branch }}
+      run_id: ${{ github.run_id }}
+      artifact: issue-dist
+    secrets: inherit

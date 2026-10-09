@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { spawnSync } from "node:child_process";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   acceptancePreflight,
   thresholdProbe,
@@ -34,7 +34,25 @@ function processResult(status = 0, stdout = "") {
     typeof spawnSync
   >;
 }
+// Mock the macOS runner so these unit tests also execute on Linux PR CI.
+beforeEach(() => {
+  vi.stubGlobal(
+    "process",
+    new Proxy(process, {
+      get(target, property) {
+        return property === "platform"
+          ? "darwin"
+          : Reflect.get(target, property);
+      },
+    }),
+  );
+  const existsSync = fs.existsSync;
+  vi.spyOn(fs, "existsSync").mockImplementation(
+    (file) => file === "/usr/bin/sandbox-exec" || existsSync(file),
+  );
+});
 afterEach(() => {
+  vi.unstubAllGlobals();
   vi.restoreAllMocks();
   vi.mocked(spawnSync).mockReset();
   for (const id of ids.splice(0))
@@ -124,6 +142,49 @@ describe("executable acceptance preflight", () => {
         ),
       ),
     ).toBe(true);
+  });
+
+  it("reviews unchanged copy failures once in baseline and preserves probe evidence", () => {
+    const id = fixture();
+    vi.mocked(spawnSync).mockImplementation((_command, args, options) => {
+      if (args?.includes("typecheck")) return processResult();
+      const dir = String(options?.cwd);
+      fs.writeFileSync(
+        path.join(dir, "preflight-results.json"),
+        JSON.stringify({
+          success: false,
+          testResults: [
+            {
+              name: path.join(dir, "src/__tests__/issue-acceptance.test.tsx"),
+              assertionResults: [
+                {
+                  fullName: "AC-1 Navbar and benefits copy",
+                  status: "failed",
+                  failureMessages: [
+                    'Unable to find "Free shipping on orders $299+"',
+                  ],
+                },
+              ],
+            },
+          ],
+        }),
+      );
+      return processResult(1);
+    });
+    const result = acceptancePreflight(id, 0, candidate, criteria, issue);
+    expect(result.failures).toHaveLength(1);
+    expect(result.failures[0].scenario).toBe("baseline");
+    expect(result.unchangedProbeFailures).toHaveLength(1);
+    expect(validateRuntimeReview(result, [])).toHaveLength(1);
+    expect(
+      validateRuntimeReview(result, [
+        {
+          id: result.failures[0].id,
+          classification: "test-defect",
+          evidence: "Invalid copy query",
+        },
+      ]),
+    ).toHaveLength(1);
   });
 
   it("does not consume generation retries for a runner timeout", () => {

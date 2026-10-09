@@ -1,0 +1,58 @@
+name: Upload production artifact to S3
+on:
+  workflow_call:
+    inputs:
+      branch:
+        required: true
+        type: string
+      run_id:
+        required: true
+        type: string
+      artifact:
+        required: true
+        type: string
+    secrets:
+      AWS_ACCESS_KEY_ID:
+        required: true
+      AWS_SECRET_ACCESS_KEY:
+        required: true
+permissions:
+  actions: read
+  contents: read
+concurrency:
+  group: s3-${{ inputs.branch }}
+  cancel-in-progress: false
+jobs:
+  upload:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      # Never check out or execute PR code in this credential-bearing job.
+      - uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.artifact }}
+          path: ${{ runner.temp }}/pr-dist
+          run-id: ${{ inputs.run_id }}
+          github-token: ${{ github.token }}
+      - name: Validate destination and artifact
+        env:
+          BRANCH: ${{ inputs.branch }}
+          DIST: ${{ runner.temp }}/pr-dist
+        run: |
+          git check-ref-format --branch "$BRANCH" >/dev/null
+          test -f "$DIST/index.html"
+          if find "$DIST" -type l -print -quit | read -r link; then
+            echo 'Build artifact must not contain symbolic links.' >&2
+            exit 1
+          fi
+      - name: Upload dist contents
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: us-east-1
+          AWS_EC2_METADATA_DISABLED: "true"
+          BRANCH: ${{ inputs.branch }}
+          DIST: ${{ runner.temp }}/pr-dist
+        run: |
+          aws s3 cp "$DIST/" "s3://lotus-ai-teach-team/hirak/$BRANCH/" --recursive --only-show-errors --no-follow-symlinks
+          printf 'Uploaded production build to s3://lotus-ai-teach-team/hirak/%s/\n' "$BRANCH" >> "$GITHUB_STEP_SUMMARY"
