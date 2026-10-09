@@ -4,6 +4,7 @@ import { products } from "../data/products";
 import { addItem, cartKey, changeQuantity, subtotal } from "../cart";
 import { ProductCard } from "../components/ProductCard";
 import App from "../App";
+
 describe("ThreadCraft", () => {
   it("merges matching variants and calculates subtotal", () => {
     const items = addItem(
@@ -16,6 +17,7 @@ describe("ThreadCraft", () => {
     expect(subtotal(items)).toBe(64);
     expect(changeQuantity(items, cartKey(items[0]), -1)[0].quantity).toBe(1);
   });
+
   it("keeps variants separate and removes zero quantity", () => {
     const items = addItem(
       addItem([], products[0], "M", products[0].colors[0]),
@@ -26,12 +28,14 @@ describe("ThreadCraft", () => {
     expect(items).toHaveLength(2);
     expect(changeQuantity(items, cartKey(items[0]), -1)).toHaveLength(1);
   });
+
   it("enforces stock across variants", () => {
     const p = { ...products[0], stockCount: 1 };
     const items = addItem([], p, "M", p.colors[0]);
     expect(addItem(items, p, "L", p.colors[0])).toEqual(items);
     expect(changeQuantity(items, cartKey(items[0]), 1)).toEqual(items);
   });
+
   it("disables sold-out purchase", () => {
     const onAdd = vi.fn();
     render(<ProductCard product={products[4]} onAdd={onAdd} />);
@@ -43,12 +47,14 @@ describe("ThreadCraft", () => {
     expect(onAdd).not.toHaveBeenCalled();
     expect(addItem([], products[4], "S", products[4].colors[0])).toEqual([]);
   });
+
   it("filters and sorts the catalog", () => {
     render(<App />);
     fireEvent.click(screen.getByRole("button", { name: "Hoodies" }));
     expect(screen.getByText("The Weekend Hoodie")).toBeInTheDocument();
     expect(screen.queryByText("Out of Office")).not.toBeInTheDocument();
   });
+
   it("distinguishes category filters from repeated product tags", () => {
     render(<App />);
     expect(() => screen.getByText("Graphic Tees")).toThrow(
@@ -64,6 +70,7 @@ describe("ThreadCraft", () => {
     expect(filter).toHaveClass("active");
     expect(screen.queryByText("The Weekend Hoodie")).not.toBeInTheDocument();
   });
+
   it("adds to drawer and modifies quantity", () => {
     render(<App />);
     fireEvent.click(screen.getAllByRole("button", { name: /Add to bag/ })[0]);
@@ -79,6 +86,7 @@ describe("ThreadCraft", () => {
       "status",
     );
   });
+
   it("shares stock across drawer variants and distinguishes line totals from subtotal", () => {
     render(<App />);
     const card = screen
@@ -157,28 +165,30 @@ it("recomputes shipping when the final cart item is removed", () => {
   const increase = within(dialog).getByRole("button", {
     name: "Increase Out of Office",
   });
-  fireEvent.click(increase);
-  fireEvent.click(increase);
-  expect(total.getByText("$96.00")).toBeInTheDocument();
+
+  for (let i = 0; i < 6; i++) fireEvent.click(increase);
+  expect(total.getByText("$224.00")).toBeInTheDocument();
   expect(shipping.getByRole("status")).toHaveTextContent(
     "You unlocked free shipping!",
   );
+
   fireEvent.click(within(dialog).getByRole("button", { name: "Checkout" }));
   expect(within(dialog).getAllByRole("status")).toHaveLength(2);
   const decrease = within(dialog).getByRole("button", {
     name: "Decrease Out of Office",
   });
+
   fireEvent.click(decrease);
-  expect(total.getByText("$64.00")).toBeInTheDocument();
+  expect(total.getByText("$192.00")).toBeInTheDocument();
   expect(shipping.getByRole("status")).toHaveTextContent(
-    "You're $11.00 away from free shipping.",
+    "You're $3.00 away from free shipping.",
   );
-  fireEvent.click(decrease);
-  fireEvent.click(decrease);
+
+  for (let i = 0; i < 6; i++) fireEvent.click(decrease);
   expect(dialog.querySelectorAll(".cart-item")).toHaveLength(0);
   expect(total.getByText("$0.00")).toBeInTheDocument();
   expect(shipping.getByRole("status")).toHaveTextContent(
-    "You're $75.00 away from free shipping.",
+    "You're $195.00 away from free shipping.",
   );
   expect(shipping.getByRole("progressbar")).toHaveAttribute("value", "0");
   expect(
